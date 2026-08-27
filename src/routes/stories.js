@@ -1,0 +1,136 @@
+const express = require('express');
+const db = require('../db');
+const { rankStories, computeStoryScore } = require('../services/story-ranking');
+const {
+  DEFAULT_TOP_STORIES_LIMIT,
+  STORY_FEED_POOL_SIZE,
+  MAX_PER_CATEGORY,
+} = require('../services/clustering-config');
+const { resolveActiveStory } = require('../ingestion/clusterer');
+
+const router = express.Router();
+
+const REPRESENTATIVE_FIELDS = 'id, title, link, source, image_url, published_at';
+const MEMBER_FIELDS = 'id, title, link, source, image_url, published_at, language';
+
+function isDebugAllowed(req) {
+  return req.query.debug === 'true' && process.env.NODE_ENV !== 'production';
+}
+
+// Loads member articles for a set of story ids in one query, grouped into a
+// Map<storyId, article[]> - the shape story-ranking.js's rankStories/
+// computeStoryScore expect.
+function loadMembersByStoryId(storyIds) {
+  const map = new Map();
+  if (storyIds.length === 0) return map;
+  const placeholders = storyIds.map(() => '?').join(',');
+  const rows = db
+    .prepare(`SELECT * FROM articles WHERE story_id IN (${placeholders})`)
+    .all(...storyIds);
+  for (const row of rows) {
+    if (!map.has(row.story_id)) map.set(row.story_id, []);
+    map.get(row.story_id).push(row);
+  }
+  return map;
+}
+
+function toRepresentativeArticle(story, membersByStoryId) {
+  const members = membersByStoryId.get(story.id) || [];
+  const rep = members.find((m) => m.id === story.representative_article_id);
+  if (rep) {
+    return {
+      id: rep.id,
+      title: rep.title,
+      link: rep.link,
+      source: rep.source,
+      image_url: rep.image_url,
+      published_at: rep.published_at,
+    };
+  }
+  // Representative row wasn't in the members batch (shouldn't normally
+  // happen) - fall back to a direct lookup rather than omitting the field.
+  return db
+    .prepare(`SELECT ${REPRESENTATIVE_FIELDS} FROM articles WHERE id = ?`)
+    .get(story.representative_article_id) || null;
+}
+
+function toStoryResponse(story, membersByStoryId, { debug } = {}) {
+  const members = membersByStoryId.get(story.id) || [];
+  const breakdown = computeStoryScore(story, members);
+  const base = {
+    id: story.id,
+    title: story.title,
+    summary: story.summary,
+    category: story.category,
+    language: story.language,
+    articleCount: story.article_count,
+    sourceCount: story.source_count,
+    firstPublishedAt: story.first_published_at,
+    latestPublishedAt: story.latest_published_at,
+    storyScore: breakdown.score,
+    representativeArticle: toRepresentativeArticle(story, membersByStoryId),
+  };
+  if (debug) {
+    base.scoreBreakdown = {
+      bestArticleScore: breakdown.bestArticleScore,
+      sourceCountSignal: breakdown.sourceCountSignal,
+      recencySignal: breakdown.recencySignal,
+      momentumSignal: breakdown.momentumSignal,
+    };
+  }
+  return base;
+}
+
+router.get('/stories/top', (req, res) => {
+  const { category } = req.query;
+  const language = req.query.language || 'en';
+  const limit = Math.min(Number(req.query.limit) || DEFAULT_TOP_STORIES_LIMIT, 50);
+  const debug = isDebugAllowed(req);
+
+  const conditions = ["status = 'active'", 'language = ?'];
+  const params = [language];
+  if (category) {
+    conditions.push('category = ?');
+    params.push(category);
+  }
+
+  const candidateStories = db
+    .prepare(
+      `SELECT * FROM stories WHERE ${conditions.join(' AND ')} ORDER BY id DESC LIMIT ?`
+    )
+    .all(...params, STORY_FEED_POOL_SIZE);
+
+  const membersByStoryId = loadMembersByStoryId(candidateStories.map((s) => s.id));
+  // Only enforce category diversity on the unfiltered "all categories" view
+  // - candidateStories is already scoped to one category above when the
+  // caller passed one, and capping there would wrongly truncate results.
+  const ranked = rankStories(candidateStories, membersByStoryId, {
+    limit,
+    maxPerCategory: category ? undefined : MAX_PER_CATEGORY,
+  });
+
+  res.json(ranked.map((story) => toStoryResponse(story, membersByStoryId, { debug })));
+});
+
+router.get('/stories/:id', (req, res) => {
+  const story = resolveActiveStory(req.params.id);
+  if (!story) {
+    res.status(404).json({ error: 'Story not found' });
+    return;
+  }
+
+  const debug = isDebugAllowed(req);
+  const membersByStoryId = loadMembersByStoryId([story.id]);
+  const response = toStoryResponse(story, membersByStoryId, { debug });
+
+  // fetched_at (not published_at) for ordering - published_at is raw RSS
+  // text (often RFC 2822) and isn't reliably sortable as a SQL string, the
+  // same reason /articles paginates on fetched_at instead (see routes/articles.js).
+  const members = db
+    .prepare(`SELECT ${MEMBER_FIELDS} FROM articles WHERE story_id = ? ORDER BY fetched_at DESC`)
+    .all(story.id);
+
+  res.json({ ...response, members });
+});
+
+module.exports = router;

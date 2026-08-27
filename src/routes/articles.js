@@ -1,0 +1,142 @@
+const express = require('express');
+const db = require('../db');
+const { rankArticles, computeRankingScore } = require('../services/ranking');
+const {
+  CANDIDATE_POOL_SIZE,
+  DEFAULT_TOP_STORIES_LIMIT,
+  MAX_PER_CATEGORY,
+} = require('../services/ranking-config');
+const { scrapeArticle } = require('../ingestion/article-scraper');
+const { getSources } = require('../ingestion/source-registry');
+const { HIDDEN_CATEGORIES } = require('../services/category-aliases');
+
+const router = express.Router();
+
+const PAGE_SIZE = 20;
+
+// Shared by /articles and /articles/top - the language/category filtering
+// is identical between "Latest" and "Top Stories", they just differ in how
+// the resulting rows get ordered/limited afterwards.
+function buildLanguageCategoryConditions(language, category) {
+  const conditions = ['language = ?'];
+  const params = [language];
+  if (category) {
+    conditions.push('category = ?');
+    params.push(category);
+  }
+  return { conditions, params };
+}
+
+router.get('/articles', (req, res) => {
+  const { category, cursor, search } = req.query;
+  const language = req.query.language || 'en';
+  const limit = Math.min(Number(req.query.limit) || PAGE_SIZE, 50);
+
+  // Cursor pagination (fetched_at, id) instead of OFFSET: the fetch cron
+  // inserts new rows every 15 minutes, which shifts numeric offsets underneath
+  // an in-progress scroll and produces duplicate/skipped rows across pages.
+  // A cursor anchored to a specific row is immune to that.
+  const { conditions, params } = buildLanguageCategoryConditions(language, category);
+  if (search) {
+    conditions.push('title LIKE ?');
+    params.push(`%${search}%`);
+  }
+  if (cursor) {
+    const [cursorFetchedAt, cursorId] = String(cursor).split('|');
+    conditions.push('(fetched_at < ? OR (fetched_at = ? AND id < ?))');
+    params.push(cursorFetchedAt, cursorFetchedAt, Number(cursorId));
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const rows = db
+    .prepare(`SELECT * FROM articles ${where} ORDER BY fetched_at DESC, id DESC LIMIT ?`)
+    .all(...params, limit);
+
+  // Order here stays chronological/relevance-based (this is not the ranked
+  // "Top Stories" endpoint) - the score is attached purely so the debug
+  // weightage pill can show it for verification, wherever articles are
+  // listed, without affecting how these results are sorted.
+  const now = new Date();
+  const rowsWithScores = rows.map((article) => {
+    const { score, freshness, importance, sourceAuthority } = computeRankingScore(article, now);
+    return {
+      ...article,
+      ranking_score: score,
+      ranking_freshness: freshness,
+      ranking_importance: importance,
+      ranking_sourceAuthority: sourceAuthority,
+    };
+  });
+
+  res.json(rowsWithScores);
+});
+
+// "Top Stories" - ranked by freshness decay + source authority + rule-based
+// importance (see services/ranking.js), not chronological. Registered
+// before /articles/:id so "top" is never swallowed by that route's :id
+// param.
+router.get('/articles/top', (req, res) => {
+  const { category } = req.query;
+  const language = req.query.language || 'en';
+  const limit = Math.min(Number(req.query.limit) || DEFAULT_TOP_STORIES_LIMIT, 50);
+
+  const { conditions, params } = buildLanguageCategoryConditions(language, category);
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const candidates = db
+    .prepare(`SELECT * FROM articles ${where} ORDER BY fetched_at DESC, id DESC LIMIT ?`)
+    .all(...params, CANDIDATE_POOL_SIZE);
+
+  // Only enforce category diversity on the unfiltered "all categories" view
+  // - candidates is already scoped to one category above when the caller
+  // passed one, and capping there would wrongly truncate results.
+  res.json(rankArticles(candidates, { limit, maxPerCategory: category ? undefined : MAX_PER_CATEGORY }));
+});
+
+router.get('/articles/:id', async (req, res) => {
+  const article = db.prepare('SELECT * FROM articles WHERE id = ?').get(req.params.id);
+  if (!article) {
+    res.status(404).json({ error: 'Article not found' });
+    return;
+  }
+
+  if (!article.content) {
+    try {
+      const scraped = await scrapeArticle(article.link);
+      if (scraped) {
+        db.prepare(
+          'UPDATE articles SET content = ?, image_caption = ?, read_time_minutes = ? WHERE id = ?'
+        ).run(scraped.content, scraped.imageCaption, scraped.readTimeMinutes, article.id);
+        article.content = scraped.content;
+        article.image_caption = scraped.imageCaption;
+        article.read_time_minutes = scraped.readTimeMinutes;
+      }
+    } catch (err) {
+      console.error(`Failed to scrape article ${article.id}:`, err.message);
+    }
+  }
+
+  const related = db
+    .prepare(
+      `SELECT id, title, link, source, category, published_at, image_url
+       FROM articles WHERE category = ? AND language = ? AND id != ? ORDER BY fetched_at DESC LIMIT 10`
+    )
+    .all(article.category, article.language, article.id);
+
+  res.json({ ...article, related });
+});
+
+router.get('/categories', (req, res) => {
+  const language = req.query.language || 'en';
+  const categories = getSources()
+    .filter((s) => (s.language || 'en') === language)
+    .map((s) => s.category)
+    .filter((category) => !HIDDEN_CATEGORIES.has(category));
+  res.json([...new Set(categories)]);
+});
+
+router.get('/languages', (req, res) => {
+  res.json([...new Set(getSources().map((s) => s.language || 'en'))]);
+});
+
+module.exports = router;

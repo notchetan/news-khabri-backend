@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+
+# the real sqlite database and any backups - a large, constantly-changing
+# data file, not source; see AGENTS.md's "Repo state" note
+*.db
+*.db-*
+*.db.bak-*
+
+# working logs from manual server runs
+server*.log
+*.log
+
+# test coverage output
+coverage/
+
+# env files
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
