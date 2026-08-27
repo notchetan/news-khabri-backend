@@ -21,7 +21,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Must satisfy package.json's own "engines" range - jsdom@30's
+          # bundled undici crashes on anything outside it (see that
+          # field's own comment context / AGENTS.md's "Repo state").
+          node-version: 24
           cache: npm
 
       # better-sqlite3 is a native module - npm ci compiles it against
