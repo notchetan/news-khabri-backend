@@ -136,10 +136,20 @@ up through ingestion.
 
 ## Repo state
 
-- This is **not currently a git repository** (no `.git`). There's no
-  commit history to lean on — be extra careful with anything
-  destructive, and mention to the user if `git init` would help before
-  doing something hard to undo by hand.
+- Hosted at `github.com/notchetan/news-khabri-backend`, public,
+  `main` branch-protected (PR-only, no direct pushes, even for the repo
+  owner). Work on a feature/fix branch and open a PR - a direct push to
+  `main` will be rejected. CI (`.github/workflows/ci.yml`) runs `npm
+  test` on every PR push.
+- **Node version matters more than usual here**: `jsdom@30`'s bundled
+  `undici` requires Node `^22.22.2 || ^24.15.0 || >=26.0.0` (see this
+  repo's own `engines` field) - anything else, including plain Node 20
+  or an early Node 22 patch, crashes the moment `jsdom` is
+  `require()`'d (`article-scraper.js`, and anything that imports it)
+  with `TypeError: webidl.util.markAsUncloneable is not a function`.
+  This was found the hard way: it passed silently in local dev (already
+  on a satisfying Node version) and only surfaced once CI ran on a
+  pinned Node 20.
 - `articles.db` (the real SQLite file) and its timestamped `.bak-*`
   copies sit at the repo root, alongside several `server*.log` files
   from past manual runs. These are working artifacts, not something to
