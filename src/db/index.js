@@ -34,10 +34,7 @@ if (!columns.some((c) => c.name === 'story_id')) {
   db.exec('ALTER TABLE articles ADD COLUMN story_id INTEGER');
 }
 if (!columns.some((c) => c.name === 'embedding')) {
-  // Stage 3 semantic similarity - see services/embeddings.js. A 384-float
-  // vector stored as a compact BLOB (1536 bytes), not JSON text - this
-  // column is written for every newly-clustered article and read back on
-  // every clustering comparison.
+  // Stage 3 semantic similarity - see docs/embeddings.md.
   db.exec('ALTER TABLE articles ADD COLUMN embedding BLOB');
 }
 
@@ -46,8 +43,8 @@ if (!columns.some((c) => c.name === 'embedding')) {
 // by fetched_at - without this, each of those was a full table scan.
 db.exec('CREATE INDEX IF NOT EXISTS idx_articles_lang_cat_fetched ON articles(language, category, fetched_at)');
 
-// Stage 2 story clustering - see services/clustering.js for the assignment
-// algorithm and ingestion/clusterer.js for how these rows get written.
+// Stage 2 story clustering - see docs/clustering-pipeline.md and
+// docs/clusterer-orchestration.md.
 db.exec(`
   CREATE TABLE IF NOT EXISTS stories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,18 +73,13 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_articles_story_id ON articles(story_id)'
 
 const storyColumns = db.prepare('PRAGMA table_info(stories)').all();
 if (!storyColumns.some((c) => c.name === 'embedding')) {
-  // The running centroid across all of the story's members (see
-  // services/embeddings.js's updateCentroid) - maintained the same way
-  // entities_json already accumulates as a union as members join.
+  // The running centroid across all of the story's members - see
+  // docs/embeddings.md's updateCentroid.
   db.exec('ALTER TABLE stories ADD COLUMN embedding BLOB');
 }
 
-// Persists every clustering decision (merge or create), including every
-// candidate story considered and its full signal breakdown - not just the
-// winner - so false merges and missed merges can be inspected after running
-// against real RSS data. Purely a debug/operational artifact: never read by
-// any API route. See clustering-config.js's LOG_CLUSTER_DECISIONS to
-// disable.
+// Debug/explainability trail for clustering decisions - see
+// docs/clustering-tuning.md's LOG_CLUSTER_DECISIONS.
 db.exec(`
   CREATE TABLE IF NOT EXISTS cluster_decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,14 +94,8 @@ db.exec(`
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_cluster_decisions_article ON cluster_decisions(article_id)');
 
-// Per-source refresh cadence, recomputed from real ingestion history - see
-// services/tier-config.js/source-tiers.js for the decision logic and
-// ingestion/tier-tracker.js for how these rows get written and read. One
-// row per source name (not per feed URL - a publisher's overall cadence is
-// what determines how often it's worth polling, see tier-config.js's own
-// comment on why this is keyed by source rather than language). Each daily
-// recompute run replaces a source's previous row entirely rather than
-// accumulating history, since only the current tier is ever needed.
+// Per-source refresh cadence - see docs/tier-system.md. One row per source
+// name (not per feed URL), replaced entirely on each daily recompute.
 db.exec(`
   CREATE TABLE IF NOT EXISTS source_tiers (
     source TEXT PRIMARY KEY,

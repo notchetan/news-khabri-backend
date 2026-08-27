@@ -1,8 +1,4 @@
-// Stage 1 ranking service - pure, framework-free functions (no Express/DB
-// coupling) so they're trivially unit-testable and so Stage 2 additions
-// (story clustering, cross-source coverage, momentum, personalization,
-// semantic similarity) can plug into rankArticles/computeRankingScore
-// without restructuring anything here.
+// Stage 1 ranking service - see docs/ranking-pipeline.md.
 const {
   FRESHNESS_DECAY_HOURS,
   RANKING_WEIGHTS,
@@ -24,10 +20,7 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-// exp(-ageInHours / FRESHNESS_DECAY_HOURS) - decays smoothly rather than
-// treating older articles as suddenly irrelevant. Missing/invalid dates (or
-// dates in the future, e.g. clock skew from a source) are treated as not
-// fresh / not in the future respectively rather than throwing.
+// See "computeFreshness" in docs/ranking-pipeline.md.
 function computeFreshness(publishedAt, now = new Date()) {
   if (!publishedAt) return 0;
   const publishedDate = new Date(publishedAt);
@@ -38,9 +31,7 @@ function computeFreshness(publishedAt, now = new Date()) {
   return clamp(freshness, 0, 1);
 }
 
-// A relatively small, configurable per-source signal - see
-// ranking-config.js's SOURCE_AUTHORITY for the reasoning and how to add a
-// new source.
+// See ranking-config.js's SOURCE_AUTHORITY / docs/ranking-tuning.md.
 function computeSourceAuthority(sourceName) {
   if (sourceName && Object.prototype.hasOwnProperty.call(SOURCE_AUTHORITY, sourceName)) {
     return SOURCE_AUTHORITY[sourceName];
@@ -48,13 +39,7 @@ function computeSourceAuthority(sourceName) {
   return DEFAULT_SOURCE_AUTHORITY;
 }
 
-// Which keywords in `list` actually match `text`, with one refinement: when
-// one matched keyword is itself a substring of another matched keyword
-// (e.g. 'court' inside 'supreme court'), only the longer/more specific one
-// counts - otherwise a single mention of "Supreme Court" would double-boost
-// via both keywords for what is, semantically, one signal. Generalizes past
-// the couple of pairs found by auditing the current lists, so a future
-// addition to either list doesn't need a fresh manual overlap check.
+// See "matchedKeywords" in docs/ranking-pipeline.md.
 function matchedKeywords(text, list) {
   const matched = list.filter((keyword) => text.includes(keyword));
   return matched.filter(
@@ -62,11 +47,7 @@ function matchedKeywords(text, list) {
   );
 }
 
-// Deterministic, keyword-based importance score - not ML, on purpose (see
-// ranking-config.js's IMPORTANCE_KEYWORDS for the actual word lists this
-// checks against, and to extend them; IMPORTANCE_PENALIZE_PATTERNS for the
-// regex-based penalties layered on top for phrasing conventions a literal
-// keyword list can't express, like "any single-company stock move").
+// See "computeImportance" in docs/ranking-pipeline.md.
 function computeImportance(article) {
   const text = [article.title, article.description, article.category]
     .filter(Boolean)
@@ -87,9 +68,7 @@ function computeImportance(article) {
   return clamp(score, IMPORTANCE_MIN, IMPORTANCE_MAX);
 }
 
-// Combines the three signals into the final weighted score. Returns the
-// breakdown alongside the total - that breakdown is what makes the result
-// explainable (and testable) rather than a single opaque number.
+// See "computeRankingScore" in docs/ranking-pipeline.md.
 function computeRankingScore(article, now = new Date()) {
   const freshness = computeFreshness(article.published_at, now);
   const importance = computeImportance(article);
@@ -103,19 +82,7 @@ function computeRankingScore(article, now = new Date()) {
   return { score, freshness, importance, sourceAuthority };
 }
 
-// Scores every candidate, sorts by score, then applies a simple per-source
-// cap so one prolific source can't fill the whole list with near-duplicate
-// wire stories - a stand-in for real story clustering/dedup, which is
-// explicitly a Stage 2 concern, not implemented here. If the cap would
-// leave fewer than `limit` results (not enough source diversity in the
-// candidate pool), the highest-scoring capped-out articles backfill the
-// remaining slots rather than returning a short list.
-//
-// maxPerCategory works the same way but is opt-in (no default) - a caller
-// that already filtered its candidates to one category (e.g.
-// /articles/top?category=business) must not pass it, or every result would
-// be truncated to the cap instead of the requested limit. Only the
-// "all categories" top-stories view should pass this.
+// See "rankArticles" in docs/ranking-pipeline.md.
 function rankArticles(articles, options = {}) {
   const {
     limit = DEFAULT_TOP_STORIES_LIMIT,

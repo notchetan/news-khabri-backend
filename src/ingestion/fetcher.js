@@ -11,11 +11,7 @@ const db = require('../db');
 const { getSources } = require('./source-registry');
 const { toThumbnailUrl } = require('../services/image-thumbnail');
 
-// A publisher can list the same story more than once (e.g. once per
-// category feed it belongs to) with only tracking params or a trailing
-// slash differing between the links - normalize those away before they're
-// used as the dedup key, or the `link` UNIQUE constraint won't catch them
-// and the same article shows up twice.
+// See "URL normalization for dedup" in docs/fetcher.md.
 const TRACKING_PARAMS = [
   'utm_source',
   'utm_medium',
@@ -43,16 +39,8 @@ function normalizeArticleUrl(url) {
   }
 }
 
-// NDTV Profit's "latest" feed (see ingestion/discovery.js's NDTV_FALLBACK)
-// isn't purely business content the way its feed URL/name implies - it's
-// everything ndtvprofit.com publishes, including a lifestyle/trending
-// section. Found by tracing real "why is this eclipse/movie-review article
-// filed under Business" reports back to this feed: ~40% of what it
-// contributed to "business" wasn't business at all. ndtvprofit.com's own
-// URLs already encode which section an article is actually in
-// (ndtvprofit.com/markets/..., /lifestyle/..., /trending/...), so this
-// derives the real category per-article from that path instead of the one
-// blanket label the feed registration gives every item.
+// See "NDTV Profit: per-article category from the URL path" in
+// docs/fetcher.md.
 const NDTV_PROFIT_FEED_URL = 'https://feeds.feedburner.com/ndtvprofit-latest';
 const NDTV_PROFIT_PATH_CATEGORY = {
   markets: 'business',
@@ -62,9 +50,6 @@ const NDTV_PROFIT_PATH_CATEGORY = {
   india: 'india',
   technology: 'tech',
   world: 'world',
-  // A trending/viral aggregation section, same as Indian Express's own
-  // "trending" section elsewhere in this app - not a topic in itself, see
-  // services/category-aliases.js's ALIASES for the same fold there.
   trending: 'opinion',
 };
 
@@ -102,13 +87,7 @@ const insert = db.prepare(`
     WHERE articles.image_url IS NULL AND excluded.image_url IS NOT NULL
 `);
 
-// sourceNameFilter is an optional Set<string> of publisher names (matching
-// each source's `name`, see ingestion/discovery.js's toEntry) - when given,
-// only feeds belonging to one of those publishers are fetched. Used by
-// index.js to run each refresh tier (ingestion/tier-tracker.js) on its own
-// cron schedule instead of always fetching every registered feed. Omitted
-// entirely (undefined), this fetches everything, same as before tiering
-// existed - the 3am full-rediscovery pass still wants that.
+// See "fetchAllFeeds's sourceNameFilter" in docs/fetcher.md.
 async function fetchAllFeeds(sourceNameFilter) {
   const allSources = getSources();
   const sources = sourceNameFilter

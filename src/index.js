@@ -27,11 +27,7 @@ async function refreshSourcesAndFetch() {
   await clusterNewArticles();
 }
 
-// Every publisher name currently registered whose refresh tier (see
-// ingestion/tier-tracker.js) matches `tier` - a source with no tier
-// computed yet (just discovered, or added before the first daily recompute
-// has run) falls back to DEFAULT_TIER rather than being silently excluded
-// from every tier's fetch.
+// See "Cron orchestration" in docs/tier-system.md.
 function sourceNamesForTier(tier) {
   const tiers = getAllSourceTiers();
   const names = new Set();
@@ -54,16 +50,7 @@ async function fetchTier(tier) {
 // imports `app` for supertest, which would otherwise trigger live fetches
 // and an unwanted extra port binding on every test run.
 if (require.main === module) {
-  // Rediscover each publisher's section feeds once a day (a full fetch of
-  // everything, ignoring tiers, so a brand-new source's very first articles
-  // land immediately rather than waiting for its first tier-scheduled
-  // fetch). Each refresh tier (see services/tier-config.js) then re-fetches
-  // only its own sources on its own cadence, sized to how often that
-  // publisher actually publishes rather than one interval for everyone -
-  // see tier-config.js's own comment for why this is keyed by source, not
-  // language. Stage 2 clustering runs right after each fetch - it only ever
-  // looks at articles with no story_id yet, so it's naturally incremental
-  // across cron cycles regardless of which tier triggered it.
+  // See "Cron orchestration" in docs/tier-system.md.
   refreshSourcesAndFetch();
   cron.schedule('0 3 * * *', refreshSourcesAndFetch);
   cron.schedule(TIER_RECOMPUTE_CRON, () => recomputeSourceTiers());

@@ -8,6 +8,21 @@ generic Node/Express defaults).
 The frontend that consumes this API lives in a sibling repo,
 `news-khabri` (Expo/React Native). It has its own `AGENTS.md`.
 
+## Comment convention
+
+Keep inline comments short - a line or two of "why", right next to the
+code it explains. A comment that would run 5+ lines (a threshold's full
+calibration history, a real-data investigation, a design tradeoff with
+alternatives considered) belongs in its own file under `docs/` instead,
+with a one-line pointer left in the code (`// See docs/whatever.md.`).
+This repo's `docs/clustering-tuning.md` and `docs/ranking-tuning.md` are
+the biggest examples - every threshold in `clustering-config.js`/
+`ranking-config.js` has its full backstory there, not inline. Skip
+comments that only restate what a past bug was and that it's fixed now -
+that belongs in the PR/commit history, not the code. `docs/` is organized
+by topic, not 1:1 with source files - check whether an existing doc
+already covers the area before creating a new one.
+
 ## What this is
 
 Node/Express + `better-sqlite3` (synchronous, no ORM) + `node-cron`.

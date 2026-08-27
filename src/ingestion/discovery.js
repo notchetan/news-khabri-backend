@@ -24,14 +24,7 @@ function fetchHtml(url) {
   });
 }
 
-// A cheap HEAD request (no body download) to resolve a single redirect hop -
-// see discoverTimesGroupRegional's own comment for why this exists: some of
-// these publishers' RSS index pages list a feed URL with no category slug in
-// it at all (the slug only appears after a 301 to the real URL), so the
-// slug this needs to categorize the feed isn't visible without resolving
-// it once at discovery time. Resolves to the original url on any error, or
-// if there's no redirect (registering the original url either way is
-// correct in that case, not just a fallback).
+// See "Redirect resolution" in docs/source-discovery.md.
 function resolveRedirect(url) {
   return new Promise((resolve) => {
     const req = https.request(
@@ -121,21 +114,8 @@ function titleCase(slug) {
   return slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
-// Indian Express's RSS index lists ~47 section feeds - far more than any
-// other publisher (Times of India: 16, Economic Times: 17, The Hindu: 7) -
-// because its page sections a story into much finer sub-splits than other
-// sites' section structures do. Left unfiltered, this single publisher
-// ends up as ~60% of the entire ingested article volume on raw feed-count
-// alone, skewing the candidate pool for both ranking and clustering toward
-// one publisher's editorial slicing regardless of any per-article scoring.
-// This excludes sections that are either redundant sub-splits of a broader
-// category already covered by another feed (fifa/olympics -> sports,
-// smart-stocks -> business), reference/explainer content rather than news
-// (how-to, what-is, when-is, who-is, upsc-current-affairs), or feature/
-// gossip/filler content of the kind already penalized elsewhere in ranking
-// (horoscope, puzzles-and-games, trending, good-news, deldi-confidential) -
-// not a blanket cut, every substantively newsy section (politics, business,
-// world, sports, entertainment, tech, health, education, ...) stays.
+// See "Indian Express: an allowlist-shaped exclusion list" in
+// docs/source-discovery.md.
 const INDIAN_EXPRESS_EXCLUDED_SLUGS = new Set([
   'books-and-literature',
   'delhi-confidential',
@@ -178,15 +158,8 @@ async function discoverIndianExpress() {
   return entries;
 }
 
-// NDTV blocks scripted access to every RSS index path we tried, so its feed
-// list can't be discovered - this stays a manual fallback.
-// Same NDTV RSS-blocking limitation as the single top-stories feed above,
-// but this was previously leaving NDTV at just 1 feed (167 articles) versus
-// e.g. Times of India's 16 (935) or Indian Express's dozens - not because
-// NDTV publishes less, but because only its single generic feed was ever
-// being read. These category feed URLs were confirmed live and genuinely
-// distinct (not aliases redirecting to the same underlying content) by
-// fetching each directly and comparing item titles.
+// See "NDTV: manual fallback, scripted access blocked" in
+// docs/source-discovery.md.
 const NDTV_FALLBACK = [
   toEntry('NDTV', 'national', 'https://feeds.feedburner.com/ndtvnews-top-stories'),
   toEntry('NDTV', 'india', 'https://feeds.feedburner.com/ndtvnews-india-news'),
@@ -197,12 +170,8 @@ const NDTV_FALLBACK = [
   toEntry('NDTV', 'business', 'https://feeds.feedburner.com/ndtvprofit-latest'),
 ];
 
-// Hindi sources. Dainik Bhaskar's RSS index page (bhaskar.com/rss/) lists
-// category feed URLs with no adjacent readable label (unlike the English
-// publishers above), so these category names were identified by fetching
-// each feed and reading its own <title> rather than scraped from a page -
-// same manual-fallback situation as NDTV above, just for several feeds
-// from one publisher instead of one feed each.
+// See "Hindi and Gujarati: manual fallbacks, unlabeled index pages" in
+// docs/source-discovery.md.
 const HINDI_FALLBACK = [
   toEntry('NDTV Khabar', 'देश', 'https://feeds.feedburner.com/ndtvkhabar-latest', 'hi'),
   toEntry('Amar Ujala', 'ताज़ा ख़बरें', 'https://www.amarujala.com/rss/breaking-news.xml', 'hi'),
@@ -215,16 +184,6 @@ const HINDI_FALLBACK = [
   toEntry('Dainik Bhaskar', 'टेक-ऑटो', 'https://www.bhaskar.com/rss-v1--category-5707.xml', 'hi'),
 ];
 
-// Gujarati - the first source in a language beyond English/Hindi. Divya
-// Bhaskar is the same publisher group/CMS as Dainik Bhaskar above (same
-// rss-v1--category-N.xml URL shape, same manual category-identification
-// situation - the index page's feed links carry no readable label, so each
-// was fetched directly and identified by its own <title>). Only the
-// genuinely newsy categories are included, same selectivity as the Indian
-// Express filter above - Divya Bhaskar's index also lists a utility/
-// how-to section, a religion/spirituality section, a general "Original"
-// features section, a magazine section, and an NRI-specific section, none
-// of which made the cut there either.
 const GUJARATI_FALLBACK = [
   toEntry('Divya Bhaskar', 'મારું ગુજરાત', 'https://www.divyabhaskar.co.in/rss-v1--category-1035.xml', 'gu'),
   toEntry('Divya Bhaskar', 'ઈન્ડિયા', 'https://www.divyabhaskar.co.in/rss-v1--category-1037.xml', 'gu'),
@@ -234,38 +193,9 @@ const GUJARATI_FALLBACK = [
   toEntry('Divya Bhaskar', 'એન્ટરટેઇનમેન્ટ', 'https://www.divyabhaskar.co.in/rss-v1--category-12042.xml', 'gu'),
 ];
 
-// Times Group runs the exact same publishing platform behind several
-// regional-language properties (Vijay Karnataka/Kannada, Maharashtra
-// Times/Marathi, and the Samayam network for Tamil/Telugu/Malayalam) as
-// timesofindia.indiatimes.com/economictimes.indiatimes.com above - an
-// RSS-index page listing every section feed, just a newer HTML template
-// (`class="rss-page__feed-item"` + a `title` attribute, not the older
-// `id`-based one those two use) - so one shared parser below handles all
-// five instead of five bespoke ones.
-//
-// Each property lists dozens of section feeds (88 for Vijay Karnataka, 34
-// for Maharashtra Times when checked) - overwhelmingly hyper-local
-// district/city editions (Yadgir, Udupi, Kolhapur, Thane, ...), the same
-// over-representation risk INDIAN_EXPRESS_EXCLUDED_SLUGS above exists to
-// avoid. REGIONAL_CATEGORY_PATTERNS is deliberately an allowlist rather than
-// a denylist, since there are far more sections to exclude than to keep
-// here. It matches against the English URL *slug* each feed's link carries
-// (.../india-news/rssfeed/12345.xml), not the page's own native-script
-// display text - confident, since it's plain English, rather than a manual
-// translation of dozens of native-script section names per language nobody
-// on this project reads fluently enough to verify.
-//
-// Substring patterns, not exact slug equality: the same topic isn't spelled
-// the same way across these five properties (Vijay Karnataka uses bare
-// "india"; Maharashtra Times uses "india-news"), and guessing every
-// property's exact spelling in advance isn't reliable - a pattern that
-// matches on the recognizable word inside the slug is.
+// See "Times Group's regional-language properties: one shared parser" in
+// docs/source-discovery.md.
 const REGIONAL_CATEGORY_PATTERNS = [
-  // World/international checked first, and \b-bounded on "national" - a
-  // bare /national/ substring match would also fire on "international"
-  // (inter-national), miscategorizing world news as india. Found by
-  // actually running this against real Maharashtra Times data, not
-  // guessed - .../international/rssfeed/... was landing under "india".
   [/\bworld\b|\binternational\b/, 'world'],
   [/\bindia\b|\bnational\b/, 'india'],
   [/cricket/, 'cricket'],
@@ -282,15 +212,6 @@ function categoryForRegionalSlug(slug) {
   return match ? match[1] : null;
 }
 
-// Some of these properties' index pages list a feed URL with no category
-// slug in it at all - the slug only appears after a 301 redirect to the
-// real URL (confirmed for Maharashtra Times: every link on its /rss page is
-// bare .../rssfeed/N.xml, redirecting to .../maharashtra/pune-news/rssfeed/
-// N.xml). resolveRedirect follows that hop once per candidate feed so the
-// slug this needs to categorize it is actually visible; a property whose
-// links already carry the slug directly (Vijay Karnataka) just resolves to
-// itself, a harmless extra HEAD request during this once-daily discovery
-// pass.
 async function discoverTimesGroupRegional(publisher, language, rssIndexUrl) {
   const html = await fetchHtml(rssIndexUrl);
   const links = [...html.matchAll(/<a[^>]+href="([^"]*rssfeed[^"]*)"[^>]*title="[^"]*"/gi)];
@@ -323,18 +244,8 @@ const REGIONAL_LANGUAGE_PROPERTIES = [
   { publisher: 'Samayam Malayalam', language: 'ml', rssIndexUrl: 'https://malayalam.samayam.com/rss' },
 ];
 
-// Bengali, Malayalam, and Odia sources that publish one combined "home"
-// feed rather than per-category ones (same 'national' -> 'india' alias
-// path Amar Ujala/NDTV's own general feeds already use, see
-// services/category-aliases.js). Verified live and legitimate, not scraped
-// programmatically - see the RSS-source-discovery research this was based
-// on: ABP Live (Bengali) and Mathrubhumi/Manorama-adjacent Malayalam
-// coverage already exists via Samayam Malayalam above, this adds
-// Mathrubhumi as a second Malayalam source. Anandabazar Patrika, Zee
-// Bengali, and Lokmat were checked and found to sit behind bot-blocking
-// WAFs that reject scripted requests entirely (not just this discovery
-// script - a real risk for the production fetcher too) - excluded rather
-// than registered and silently failing every fetch.
+// See "Bengali, Malayalam, Odia: single combined-feed sources" in
+// docs/source-discovery.md.
 const BENGALI_FALLBACK = [
   toEntry('ABP Live', 'national', 'https://bengali.abplive.com/home/feed', 'bn'),
 ];
