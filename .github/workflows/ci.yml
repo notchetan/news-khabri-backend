@@ -1,0 +1,31 @@
+name: CI
+
+# Runs on every push to a PR branch (so it reports per-commit, not just
+# once at merge time) and on main itself. See AGENTS.md's "Testing
+# conventions" - `npm test` here never touches the real network or the
+# real embeddings model (getEmbedding is mocked everywhere except
+# services/embeddings.js's own pure-math unit tests), so this stays fast
+# and deterministic in CI.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # better-sqlite3 is a native module - npm ci compiles it against
+      # this runner, same as it would on any fresh install.
+      - run: npm ci
+
+      - run: npm test
