@@ -1,9 +1,5 @@
-// DB-touching orchestration for Stage 2 story clustering - the only file
-// that reads/writes the `stories`/`cluster_decisions` tables or touches
-// `articles.story_id`. The actual merge-or-create decision is delegated to
-// the pure services/clustering.js so that logic stays framework/DB-free and
-// independently unit-testable, mirroring how ingestion/fetcher.js is the
-// DB-touching counterpart to the pure services/ranking.js.
+// DB-touching orchestration for Stage 2 story clustering - see
+// docs/clusterer-orchestration.md.
 const db = require('../db');
 const { extractEntities } = require('../services/entity-extraction');
 const { decideAssignment, computeQuality } = require('../services/clustering');
@@ -16,13 +12,8 @@ const {
   LOG_CLUSTER_DECISIONS,
 } = require('../services/clustering-config');
 
-// published_at comes straight from RSS feeds (often RFC 2822, e.g. "Wed, 26
-// Aug 2026 15:30:57 +0000") and is stored as raw TEXT - NOT reliably
-// sortable/comparable as a SQL string (the existing /articles route already
-// works around this same issue by paginating on `fetched_at` instead). So
-// the SQL query below only blocks by the cheap, reliable columns (language,
-// category, status) and a generous id-ordered pool; the real time-window
-// math happens in JS afterward using proper Date parsing.
+// See "Why candidate filtering happens in JS, not SQL" in
+// docs/clusterer-orchestration.md.
 const SQL_FETCH_MULTIPLIER = 4;
 
 const selectCandidateStoriesStmt = db.prepare(`
@@ -32,13 +23,8 @@ const selectCandidateStoriesStmt = db.prepare(`
   LIMIT ?
 `);
 
-// No LIMIT here on purpose: this only ever processes rows that haven't been
-// clustered yet, which trends toward zero as the backlog clears, and
-// clustering runs as a background cron step (see index.js), never inline
-// with a user-facing request - there's no reason to artificially cap and
-// stretch a one-time historical backlog (e.g. right after this migration
-// first runs) across many 15-minute cron cycles when it can safely clear in
-// one pass instead.
+// No LIMIT on purpose - see "No LIMIT on the unclustered-articles query"
+// in docs/clusterer-orchestration.md.
 const selectUnclusteredArticlesStmt = db.prepare(`
   SELECT * FROM articles WHERE story_id IS NULL ORDER BY id ASC
 `);
@@ -92,10 +78,6 @@ function toCandidateShape(storyRow) {
   };
 }
 
-// Precise time-window filtering (real Date parsing, not SQL string
-// comparison) - see the comment above SQL_FETCH_MULTIPLIER. Also caps the
-// final candidate list handed to the (more expensive) similarity math at
-// CANDIDATE_STORY_POOL_SIZE, most-recent first.
 function filterCandidatesByTimeWindow(storyRows, article) {
   const articlePublishedAt = new Date(article.published_at);
   if (Number.isNaN(articlePublishedAt.getTime())) return [];
@@ -166,6 +148,7 @@ function mergeArticleIntoStory(article, story, now) {
     .get(story.id, article.source);
   const newSourceCount = existingDistinctSources + (sourceAlreadyPresent ? 0 : 1);
 
+  // Incremental update (see mergeStories for the full-recompute version).
   const updatedCentroid = updateCentroid(deserializeEmbedding(story.embedding), story.article_count, article.embedding);
 
   updateStoryOnMergeStmt.run({
@@ -183,15 +166,7 @@ function mergeArticleIntoStory(article, story, now) {
   });
 }
 
-// The main incremental pass - call after fetchAllFeeds(). Only articles
-// with story_id IS NULL are considered; since the fetcher's ON CONFLICT
-// upsert preserves an article's id across re-fetches (see fetcher.js),
-// already-clustered articles are never re-touched.
-//
-// Async since Stage 3: each article needs its embedding computed once
-// (getEmbedding) before decideAssignment can use the semantic signal - the
-// decision logic itself (services/clustering.js) stays synchronous/pure, the
-// embedding is just data by the time it gets there.
+// See "clusterNewArticles" in docs/clusterer-orchestration.md.
 async function clusterNewArticles() {
   const now = new Date();
   const unclustered = selectUnclusteredArticlesStmt.all();
@@ -224,12 +199,8 @@ async function clusterNewArticles() {
   return unclustered.length;
 }
 
-// Reconciliation mechanism (the policy of automatically detecting that two
-// existing stories describe the same event is a Stage 3 job - this is the
-// mechanism it would call into). Repoints every member article from
-// `sourceStoryId` to `targetStoryId`, recomputes the target's aggregates
-// from its complete new membership, and marks the source `status='merged'`
-// rather than deleting it, so its id/history stay resolvable.
+// See "mergeStories: the reconciliation mechanism" in
+// docs/clusterer-orchestration.md.
 function mergeStories(sourceStoryId, targetStoryId) {
   if (sourceStoryId === targetStoryId) {
     throw new Error('Cannot merge a story into itself');
@@ -255,10 +226,6 @@ function mergeStories(sourceStoryId, targetStoryId) {
     );
     const latestPublishedAt = members.reduce((max, m) => laterOf(max, m.published_at), null);
 
-    // Recomputed from the full final membership (not incrementally, unlike
-    // mergeArticleIntoStory's single-article update) since this reconciles
-    // two already-established stories, each already an accumulated centroid
-    // in its own right.
     let centroid = null;
     let centroidCount = 0;
     for (const member of members) {
@@ -289,8 +256,7 @@ function mergeStories(sourceStoryId, targetStoryId) {
   merge();
 }
 
-// Follows merged_into_story_id chains so a pre-merge id still resolves to
-// the canonical, currently-active story rather than 404ing.
+// See "resolveActiveStory" in docs/clusterer-orchestration.md.
 function resolveActiveStory(storyId) {
   let story = db.prepare('SELECT * FROM stories WHERE id = ?').get(storyId);
   const visited = new Set();
