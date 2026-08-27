@@ -1,14 +1,15 @@
 # News Khabri backend
 
 The ingestion, clustering, and ranking service behind
-[News Khabri](https://github.com/notchetan/news-khabri), an Indian news
-aggregator. This service pulls articles from Indian publishers' public
-RSS feeds, groups same-event coverage across sources into a single
-story, ranks everything by a mix of source count, recency, and
-significance, and serves it all over a small REST API.
+[News Khabri](https://github.com/notchetan/news-khabri-frontend), an
+Indian news aggregator. This service pulls articles from Indian
+publishers' public RSS feeds, groups same-event coverage across sources
+into a single story, ranks everything by a mix of source count, recency,
+and significance, and serves it all over a small REST API.
 
 The frontend (Expo/React Native) that consumes this API lives in a
-separate repo: [news-khabri](https://github.com/notchetan/news-khabri).
+separate repo:
+[news-khabri-frontend](https://github.com/notchetan/news-khabri-frontend).
 
 ## How it works
 
