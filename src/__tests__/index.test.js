@@ -67,6 +67,24 @@ describe('GET /articles', () => {
     expect(res.body.map((a) => a.id)).toEqual([2]);
   });
 
+  test('filters by a comma-separated sources list', async () => {
+    insertArticle({ id: 1, source: 'NDTV' });
+    insertArticle({ id: 2, source: 'BBC Sport' });
+    insertArticle({ id: 3, source: 'The Hindu' });
+
+    const sourcesParam = encodeURIComponent('NDTV,The Hindu');
+    const res = await request(app).get(`/articles?sources=${sourcesParam}`);
+    expect(res.body.map((a) => a.id).sort()).toEqual([1, 3]);
+  });
+
+  test('ignores an empty sources param (no filter, same as omitting it)', async () => {
+    insertArticle({ id: 1, source: 'NDTV' });
+    insertArticle({ id: 2, source: 'BBC Sport' });
+
+    const res = await request(app).get('/articles?sources=');
+    expect(res.body).toHaveLength(2);
+  });
+
   test('respects a custom limit', async () => {
     insertArticle({ id: 1, fetched_at: '2026-08-25 10:00:00' });
     insertArticle({ id: 2, fetched_at: '2026-08-25 11:00:00' });
@@ -201,6 +219,14 @@ describe('GET /articles/top', () => {
     expect(res.body.map((a) => a.id)).toEqual([1]);
   });
 
+  test('filters by a comma-separated sources list', async () => {
+    insertArticle({ id: 1, source: 'NDTV' });
+    insertArticle({ id: 2, source: 'BBC Sport' });
+
+    const res = await request(app).get('/articles/top?sources=NDTV');
+    expect(res.body.map((a) => a.id)).toEqual([1]);
+  });
+
   test('respects a custom limit', async () => {
     for (let i = 1; i <= 5; i++) {
       insertArticle({ id: i, fetched_at: `2026-08-25 12:0${i}:00` });
@@ -329,6 +355,37 @@ describe('GET /categories', () => {
     expect(res.body).toEqual(['national']);
   });
 
+  test('when a sources filter is given, only returns categories that actually have an article from one of those sources', async () => {
+    // Registered for both, but only NDTV has actually published a business
+    // article - selecting only NDTV should hide "sports" even though it's
+    // a real configured category (registered feeds aren't checked once a
+    // sources filter is active - real DB content is).
+    setSources([
+      { name: 'NDTV', category: 'business', language: 'en' },
+      { name: 'NDTV', category: 'sports', language: 'en' },
+      { name: 'BBC Sport', category: 'sports', language: 'en' },
+    ]);
+    insertArticle({ id: 1, source: 'NDTV', category: 'business', language: 'en' });
+    insertArticle({ id: 2, source: 'BBC Sport', category: 'sports', language: 'en' });
+
+    const res = await request(app).get('/categories?language=en&sources=NDTV');
+    expect(res.body).toEqual(['business']);
+  });
+
+  test('a sources filter still excludes hidden categories', async () => {
+    insertArticle({ id: 1, source: 'NDTV', category: 'opinion', language: 'en' });
+    insertArticle({ id: 2, source: 'NDTV', category: 'business', language: 'en' });
+
+    const res = await request(app).get('/categories?language=en&sources=NDTV');
+    expect(res.body).toEqual(['business']);
+  });
+
+  test('an empty sources param falls back to the unfiltered, registry-based list', async () => {
+    setSources([{ name: 'A', category: 'national', language: 'en' }]);
+    const res = await request(app).get('/categories?language=en&sources=');
+    expect(res.body).toEqual(['national']);
+  });
+
   test('excludes "top stories" from the pill list (a publisher front-page feed, not a real topic)', async () => {
     setSources([
       { name: 'A', category: 'national', language: 'en' },
@@ -352,6 +409,34 @@ describe('GET /languages', () => {
 
   test('returns an empty list when no sources are registered', async () => {
     const res = await request(app).get('/languages');
+    expect(res.body).toEqual([]);
+  });
+});
+
+describe('GET /sources', () => {
+  test('returns unique, sorted publisher names for the requested language only', async () => {
+    setSources([
+      { name: 'NDTV', category: 'national', language: 'en' },
+      { name: 'NDTV', category: 'business', language: 'en' },
+      { name: 'BBC Sport', category: 'sports', language: 'en' },
+      { name: 'Dainik Bhaskar', category: 'देश', language: 'hi' },
+    ]);
+
+    const en = await request(app).get('/sources?language=en');
+    expect(en.body).toEqual(['BBC Sport', 'NDTV']);
+
+    const hi = await request(app).get('/sources?language=hi');
+    expect(hi.body).toEqual(['Dainik Bhaskar']);
+  });
+
+  test('defaults to language=en when not specified', async () => {
+    setSources([{ name: 'NDTV', category: 'national', language: 'en' }]);
+    const res = await request(app).get('/sources');
+    expect(res.body).toEqual(['NDTV']);
+  });
+
+  test('returns an empty list when no sources are registered', async () => {
+    const res = await request(app).get('/sources');
     expect(res.body).toEqual([]);
   });
 });

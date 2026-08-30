@@ -118,3 +118,36 @@ Bengali, and Lokmat were checked during the same research and found to
 sit behind bot-blocking WAFs that reject scripted requests entirely (not
 just this discovery script - a real risk for the production fetcher too)
 - excluded rather than registered and silently failing every fetch.
+
+## BBC Sport: manual fallback, sports-only publisher
+
+A single/few-feed sports publisher, not a full multi-category newsroom
+with an RSS index page to scrape - same shape as NDTV's situation above,
+just by nature of the publisher rather than any access-blocking.
+`SPORTS_FALLBACK`'s two feeds were confirmed live and genuinely distinct
+by fetching each directly and reading its own `<title>`/`<description>`:
+`sport/rss.xml` ("BBC Sport - Sport Front Page") and `sport/cricket/rss.xml`
+("BBC Sport - Cricket") are both kept since cricket is this app's
+dominant sport and BBC runs the two as separate feeds rather than one
+folding into the other. Categorized as `sports` and `cricket`
+respectively - cricket is deliberately its own category, not folded into
+`sports` (see `docs/category-taxonomy.md`).
+
+### ESPN Cricinfo: excluded, Akamai blocks every article page
+
+ESPN Cricinfo's RSS feeds themselves are fetchable (`feeds/0.xml` is its
+general "Cricket news from Cricinfo.com" feed - not `feeds/6.xml`, which
+is India-specific cricket news, already well covered by the existing
+Indian publishers), but every article page returns `403 Access Denied`
+from Akamai (`errors.edgesuite.net`) regardless of how the request is
+made - a plain fetch, full browser-shaped headers, and a real headless
+Chromium (Playwright) with a genuine UA all hit the identical block. This
+points at an IP-reputation block rather than a header/JS check, since
+none of those changed the outcome. That means `article-scraper.js` (see
+`docs/article-scraper.md`) can never produce full content for these -
+`scrapeArticle` always returns `null`, and every single article would
+permanently fall back to the generic "couldn't load article" state
+(`articleContentError` in the frontend) rather than that being an
+occasional edge case like it is for other sources. Left out rather than
+registered in a permanently-degraded state; BBC Sport's own cricket feed
+above covers the same beat with working scraping.

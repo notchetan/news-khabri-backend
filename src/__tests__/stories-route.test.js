@@ -134,6 +134,23 @@ describe('GET /stories/top', () => {
     expect(res.body.map((s) => s.id)).toEqual([wanted]);
   });
 
+  test('filters by sources - a story counts if any member article matches, not just the representative one', async () => {
+    // wanted's representative article is from NDTV, but a second member came
+    // from BBC Sport - filtering by BBC Sport should still surface it,
+    // proving this checks every member, not just representative_article_id.
+    const wanted = insertStory();
+    insertArticle({ id: 1, story_id: wanted, source: 'NDTV' });
+    insertArticle({ id: 2, story_id: wanted, source: 'BBC Sport' });
+    db.prepare('UPDATE stories SET representative_article_id = 1 WHERE id = ?').run(wanted);
+
+    const unwanted = insertStory();
+    insertArticle({ id: 3, story_id: unwanted, source: 'The Hindu' });
+    db.prepare('UPDATE stories SET representative_article_id = 3 WHERE id = ?').run(unwanted);
+
+    const res = await request(app).get(`/stories/top?sources=${encodeURIComponent('BBC Sport')}`);
+    expect(res.body.map((s) => s.id)).toEqual([wanted]);
+  });
+
   test('caps how many stories from the same category appear in the unfiltered feed', async () => {
     const { MAX_PER_CATEGORY } = require('../services/clustering-config');
     let nextId = 1;

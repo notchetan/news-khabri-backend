@@ -82,7 +82,7 @@ function toStoryResponse(story, membersByStoryId, { debug } = {}) {
 }
 
 router.get('/stories/top', (req, res) => {
-  const { category } = req.query;
+  const { category, sources } = req.query;
   const language = req.query.language || 'en';
   const limit = Math.min(Number(req.query.limit) || DEFAULT_TOP_STORIES_LIMIT, 50);
   const debug = isDebugAllowed(req);
@@ -92,6 +92,18 @@ router.get('/stories/top', (req, res) => {
   if (category) {
     conditions.push('category = ?');
     params.push(category);
+  }
+  // A story clusters articles from several publishers, so "filter by
+  // source" can't be a plain column check like /articles' own - it means
+  // "at least one member article came from a selected source" instead.
+  const sourceList = sources ? String(sources).split(',').filter(Boolean) : [];
+  if (sourceList.length > 0) {
+    conditions.push(
+      `EXISTS (SELECT 1 FROM articles WHERE articles.story_id = stories.id AND articles.source IN (${sourceList
+        .map(() => '?')
+        .join(',')}))`
+    );
+    params.push(...sourceList);
   }
 
   const candidateStories = db
@@ -134,3 +146,6 @@ router.get('/stories/:id', (req, res) => {
 });
 
 module.exports = router;
+// Reused by services/push-notifications.js to compute the same "top story"
+// a device would see on /stories/top, without duplicating this query.
+module.exports.loadMembersByStoryId = loadMembersByStoryId;

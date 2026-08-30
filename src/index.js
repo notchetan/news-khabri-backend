@@ -9,14 +9,17 @@ const { setSources, getSources } = require('./ingestion/source-registry');
 const { clusterNewArticles } = require('./ingestion/clusterer');
 const { recomputeSourceTiers, getAllSourceTiers } = require('./ingestion/tier-tracker');
 const { TIER_CRON, TIER_RECOMPUTE_CRON, DEFAULT_TIER } = require('./services/tier-config');
+const { sendTrendingNotifications } = require('./services/push-notifications');
 const articlesRouter = require('./routes/articles');
 const storiesRouter = require('./routes/stories');
+const pushRouter = require('./routes/push');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(articlesRouter);
 app.use(storiesRouter);
+app.use(pushRouter);
 
 async function refreshSourcesAndFetch() {
   const discovered = await discoverAllSources();
@@ -58,6 +61,12 @@ if (require.main === module) {
   cron.schedule(TIER_CRON.fast, () => fetchTier('fast'));
   cron.schedule(TIER_CRON.medium, () => fetchTier('medium'));
   cron.schedule(TIER_CRON.slow, () => fetchTier('slow'));
+
+  // Every 5 minutes - the finest interval a device can choose (see
+  // push.js's VALID_INTERVALS) - sendTrendingNotifications itself only
+  // actually notifies whichever devices are due (see push-notifications.js's
+  // isDue), so this doesn't over-notify anyone on a longer interval.
+  cron.schedule('*/5 * * * *', () => sendTrendingNotifications());
 
   const PORT = 3000;
   app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));

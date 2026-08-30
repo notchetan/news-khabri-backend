@@ -259,6 +259,13 @@ const ODIA_FALLBACK = [
   toEntry('Pragativadi', 'national', 'https://www.pragativadi.com/feed', 'or'),
 ];
 
+// See "BBC Sport: manual fallback, sports-only publisher" in
+// docs/source-discovery.md.
+const SPORTS_FALLBACK = [
+  toEntry('BBC Sport', 'sports', 'https://feeds.bbci.co.uk/sport/rss.xml'),
+  toEntry('BBC Sport', 'cricket', 'https://feeds.bbci.co.uk/sport/cricket/rss.xml'),
+];
+
 async function discoverAllSources() {
   const scrapers = [discoverTimesOfIndia, discoverEconomicTimes, discoverTheHindu, discoverIndianExpress];
   const regionalScrapers = REGIONAL_LANGUAGE_PROPERTIES.map(
@@ -287,6 +294,7 @@ async function discoverAllSources() {
     ...KANNADA_FALLBACK,
     ...MALAYALAM_FALLBACK,
     ...ODIA_FALLBACK,
+    ...SPORTS_FALLBACK,
   ];
 }
 
