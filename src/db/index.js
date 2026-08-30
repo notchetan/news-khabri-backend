@@ -106,4 +106,19 @@ db.exec(`
   )
 `);
 
+// One row per device - see docs/push-notifications.md. interval_minutes is
+// the device's own chosen cadence (0 = off, never notified); last_notified_at
+// is what the cron in services/push-notifications.js compares against that
+// interval to decide whether a device is due again.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    push_token TEXT UNIQUE NOT NULL,
+    interval_minutes INTEGER NOT NULL DEFAULT 0,
+    language TEXT NOT NULL DEFAULT 'en',
+    last_notified_at TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
 module.exports = db;
