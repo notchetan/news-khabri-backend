@@ -164,3 +164,34 @@ describe('DELETE /me/bookmarks/:articleId', () => {
     expect(res.status).toBe(204);
   });
 });
+
+describe('DELETE /me/bookmarks (clear all)', () => {
+  test('requires authentication', async () => {
+    const res = await request(app).delete('/me/bookmarks');
+    expect(res.status).toBe(401);
+  });
+
+  test('clears only the requesting user’s bookmarks', async () => {
+    insertUser(2);
+    insertArticle({ id: 1, link: 'https://example.com/1' });
+    insertArticle({ id: 2, link: 'https://example.com/2' });
+    await request(app).post('/me/bookmarks').set('Authorization', `Bearer ${signSessionToken(1)}`).send({ articleId: 1 });
+    await request(app).post('/me/bookmarks').set('Authorization', `Bearer ${signSessionToken(1)}`).send({ articleId: 2 });
+    await request(app).post('/me/bookmarks').set('Authorization', `Bearer ${signSessionToken(2)}`).send({ articleId: 1 });
+
+    const res = await request(app)
+      .delete('/me/bookmarks')
+      .set('Authorization', `Bearer ${signSessionToken(1)}`);
+    expect(res.status).toBe(204);
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM bookmarks WHERE user_id = 1').get().n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM bookmarks WHERE user_id = 2').get().n).toBe(1);
+  });
+
+  test('is a no-op 204 when the list is already empty', async () => {
+    const res = await request(app)
+      .delete('/me/bookmarks')
+      .set('Authorization', `Bearer ${signSessionToken(1)}`);
+    expect(res.status).toBe(204);
+  });
+});

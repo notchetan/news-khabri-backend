@@ -13,6 +13,7 @@ const insertBookmarkStmt = db.prepare(`
 const deleteBookmarkStmt = db.prepare(
   'DELETE FROM bookmarks WHERE user_id = ? AND article_id = ?'
 );
+const deleteAllBookmarksStmt = db.prepare('DELETE FROM bookmarks WHERE user_id = ?');
 // Joined back to articles so the app's Saved screen can render a real card
 // (title/image/source) for each row - the same column set /articles
 // exposes, plus bookmarked_at. Newest save first.
@@ -48,6 +49,13 @@ router.post('/me/bookmarks', requireAuth, (req, res) => {
   }
 
   insertBookmarkStmt.run({ user_id: req.userId, article_id: articleId });
+  res.status(204).end();
+});
+
+// Clear the whole list in one call - the app's "Clear all" action. 204
+// even when there was nothing to clear.
+router.delete('/me/bookmarks', requireAuth, (req, res) => {
+  deleteAllBookmarksStmt.run(req.userId);
   res.status(204).end();
 });
 

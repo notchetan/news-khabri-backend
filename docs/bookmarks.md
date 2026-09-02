@@ -26,6 +26,9 @@ the same call shape `read_events` / `POST /me/reads` already uses:
   (`404` if unknown), then `INSERT ... ON CONFLICT(user_id, article_id) DO
   NOTHING`. `204`.
 - `DELETE /me/bookmarks/:articleId` - `204` even if nothing matched.
+- `DELETE /me/bookmarks` - clears the whole list for the user in one call
+  (the app's "Clear all" action). `204` even when there was nothing to
+  clear.
 
 ## No server-side merge
 
