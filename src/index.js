@@ -15,6 +15,7 @@ const storiesRouter = require('./routes/stories');
 const pushRouter = require('./routes/push');
 const authRouter = require('./routes/auth');
 const readsRouter = require('./routes/reads');
+const bookmarksRouter = require('./routes/bookmarks');
 
 const app = express();
 app.use(cors());
@@ -24,6 +25,7 @@ app.use(storiesRouter);
 app.use(pushRouter);
 app.use(authRouter);
 app.use(readsRouter);
+app.use(bookmarksRouter);
 
 async function refreshSourcesAndFetch() {
   const discovered = await discoverAllSources();

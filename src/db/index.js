@@ -215,4 +215,18 @@ db.exec(`
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_read_events_user ON read_events(user_id, read_at)');
 
+// One row per article a signed-in user has saved - see docs/bookmarks.md.
+// The composite primary key makes POST /me/bookmarks idempotent (a repeat
+// save is an ON CONFLICT DO NOTHING no-op), which is what lets the app
+// replay its whole on-device guest list at sign-in without deduping first.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS bookmarks (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    article_id INTEGER NOT NULL REFERENCES articles(id),
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, article_id)
+  )
+`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON bookmarks(user_id, created_at)');
+
 module.exports = db;
