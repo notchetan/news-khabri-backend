@@ -196,6 +196,14 @@ db.exec(`
   )
 `);
 
+// Guarded add for databases created before app_icon existed - same
+// PRAGMA-check-then-ALTER style used for the articles table above. Null =
+// the account has no custom icon chosen (the theme-following default).
+const userPrefColumns = db.prepare('PRAGMA table_info(user_preferences)').all();
+if (!userPrefColumns.some((c) => c.name === 'app_icon')) {
+  db.exec('ALTER TABLE user_preferences ADD COLUMN app_icon TEXT');
+}
+
 // One row per article a signed-in user opens - see docs/personalization.md.
 // category/source/entities_json are captured from the article's own story
 // at read time (denormalized, same reasoning stories.entities_json already

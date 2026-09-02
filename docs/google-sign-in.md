@@ -34,7 +34,12 @@ AsyncStorage key already uses (see the frontend's
 table. `PUT /me/preferences` is a whole-object replace of one row, not a
 partial patch - the app always sends its full current preference set, so
 there's no server-side merge logic to keep in sync with the client's own
-five independent preference contexts.
+independent preference contexts.
+
+`user_preferences.app_icon` (added later, guarded ALTER in `db/index.js`)
+rides the same bundle: `null` = the theme-following default icon, a
+string like `"custom_05"` = the alternate icon a signed-in user picked
+(see the frontend's `contexts/app-icon-preference.tsx`).
 
 ## `JWT_SECRET` fails loudly outside tests
 

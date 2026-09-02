@@ -30,6 +30,7 @@ function toPreferencesResponse(row) {
     debugEnabled: !!row.debug_enabled,
     sources: row.sources_json ? JSON.parse(row.sources_json) : {},
     notificationInterval: row.notification_interval,
+    appIcon: row.app_icon,
   };
 }
 
@@ -74,8 +75,8 @@ router.get('/me', requireAuth, (req, res) => {
 });
 
 const upsertPreferences = db.prepare(`
-  INSERT INTO user_preferences (user_id, theme, font_size, language, debug_enabled, sources_json, notification_interval, updated_at)
-  VALUES (@userId, @theme, @fontSize, @language, @debugEnabled, @sourcesJson, @notificationInterval, CURRENT_TIMESTAMP)
+  INSERT INTO user_preferences (user_id, theme, font_size, language, debug_enabled, sources_json, notification_interval, app_icon, updated_at)
+  VALUES (@userId, @theme, @fontSize, @language, @debugEnabled, @sourcesJson, @notificationInterval, @appIcon, CURRENT_TIMESTAMP)
   ON CONFLICT(user_id) DO UPDATE SET
     theme = excluded.theme,
     font_size = excluded.font_size,
@@ -83,6 +84,7 @@ const upsertPreferences = db.prepare(`
     debug_enabled = excluded.debug_enabled,
     sources_json = excluded.sources_json,
     notification_interval = excluded.notification_interval,
+    app_icon = excluded.app_icon,
     updated_at = CURRENT_TIMESTAMP
 `);
 
@@ -90,7 +92,8 @@ const upsertPreferences = db.prepare(`
 // full current preference set (see docs/google-sign-in.md), so there's no
 // need for per-field optionality/merging here.
 router.put('/me/preferences', requireAuth, (req, res) => {
-  const { theme, fontSize, language, debugEnabled, sources, notificationInterval } = req.body;
+  const { theme, fontSize, language, debugEnabled, sources, notificationInterval, appIcon } =
+    req.body;
 
   upsertPreferences.run({
     userId: req.userId,
@@ -100,6 +103,7 @@ router.put('/me/preferences', requireAuth, (req, res) => {
     debugEnabled: debugEnabled ? 1 : 0,
     sourcesJson: JSON.stringify(sources ?? {}),
     notificationInterval: notificationInterval ?? 0,
+    appIcon: appIcon ?? null,
   });
 
   res.json({ preferences: toPreferencesResponse(getPreferences.get(req.userId)) });

@@ -126,6 +126,7 @@ describe('PUT /me/preferences', () => {
       debugEnabled: true,
       sources: { en: ['NDTV'], hi: [] },
       notificationInterval: 15,
+      appIcon: 'custom_05',
     };
 
     const putRes = await request(app)
@@ -153,6 +154,15 @@ describe('PUT /me/preferences', () => {
 
     const res = await request(app).get('/me').set('Authorization', `Bearer ${token}`);
     expect(res.body.preferences).toMatchObject({ theme: 'day', fontSize: 'medium', language: 'en', debugEnabled: false });
+  });
+
+  test('appIcon defaults to null when the client omits it', async () => {
+    const token = await signIn();
+    const res = await request(app)
+      .put('/me/preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ theme: 'day', fontSize: 'medium', language: 'en', debugEnabled: false, sources: {}, notificationInterval: 0 });
+    expect(res.body.preferences.appIcon).toBeNull();
   });
 
   test('rejects an unauthenticated request', async () => {
