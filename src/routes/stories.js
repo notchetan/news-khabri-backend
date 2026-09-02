@@ -1,6 +1,8 @@
 const express = require('express');
 const db = require('../db');
 const { rankStories, computeStoryScore } = require('../services/story-ranking');
+const { loadReadProfile } = require('../services/personalization');
+const { verifySessionToken } = require('../services/auth');
 const {
   DEFAULT_TOP_STORIES_LIMIT,
   STORY_FEED_POOL_SIZE,
@@ -15,6 +17,17 @@ const MEMBER_FIELDS = 'id, title, link, source, image_url, published_at, languag
 
 function isDebugAllowed(req) {
   return req.query.debug === 'true' && process.env.NODE_ENV !== 'production';
+}
+
+// Distinct from requireAuth (middleware/require-auth.js) - /stories/top
+// stays public. A missing/invalid/expired token just means no
+// personalization signal for this request, not a 401 - see
+// docs/personalization.md. verifySessionToken never throws (returns null
+// for anything invalid), so this is always safe to call.
+function getOptionalUserId(req) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : null;
+  return verifySessionToken(token);
 }
 
 // Loads member articles for a set of story ids in one query, grouped into a
@@ -54,9 +67,9 @@ function toRepresentativeArticle(story, membersByStoryId) {
     .get(story.representative_article_id) || null;
 }
 
-function toStoryResponse(story, membersByStoryId, { debug } = {}) {
+function toStoryResponse(story, membersByStoryId, { debug, readProfile } = {}) {
   const members = membersByStoryId.get(story.id) || [];
-  const breakdown = computeStoryScore(story, members);
+  const breakdown = computeStoryScore(story, members, new Date(), readProfile);
   const base = {
     id: story.id,
     title: story.title,
@@ -76,6 +89,7 @@ function toStoryResponse(story, membersByStoryId, { debug } = {}) {
       sourceCountSignal: breakdown.sourceCountSignal,
       recencySignal: breakdown.recencySignal,
       momentumSignal: breakdown.momentumSignal,
+      personalizationSignal: breakdown.personalizationSignal,
     };
   }
   return base;
@@ -86,6 +100,7 @@ router.get('/stories/top', (req, res) => {
   const language = req.query.language || 'en';
   const limit = Math.min(Number(req.query.limit) || DEFAULT_TOP_STORIES_LIMIT, 50);
   const debug = isDebugAllowed(req);
+  const readProfile = loadReadProfile(getOptionalUserId(req));
 
   const conditions = ["status = 'active'", 'language = ?'];
   const params = [language];
@@ -119,9 +134,10 @@ router.get('/stories/top', (req, res) => {
   const ranked = rankStories(candidateStories, membersByStoryId, {
     limit,
     maxPerCategory: category ? undefined : MAX_PER_CATEGORY,
+    readProfile,
   });
 
-  res.json(ranked.map((story) => toStoryResponse(story, membersByStoryId, { debug })));
+  res.json(ranked.map((story) => toStoryResponse(story, membersByStoryId, { debug, readProfile })));
 });
 
 router.get('/stories/:id', (req, res) => {

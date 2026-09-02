@@ -51,6 +51,34 @@ the day, motivational, ...) were added after a real ranking trace: a
 "proverb of the day" piece scored a neutral 0.5 (no boost, no penalty)
 and rode freshness alone into the top 20 alongside genuine breaking news.
 
+### Per-language lists
+
+`IMPORTANCE_KEYWORDS` is keyed by language (`en`, `hi`, `gu`, `bn`, `kn`,
+`mr`, `ml`, `ta`, `te`, `or`) - `computeImportance()` looks up
+`article.language`, falling back to `en` for anything unrecognized. Before
+this, the list was English-only, so a non-English article could never
+match any keyword and always scored exactly `IMPORTANCE_BASELINE`
+regardless of actual newsworthiness, while English articles got real
+differentiation - a language-fairness bug, not just a missing feature,
+since `computeImportance`'s output feeds `bestArticleScore`, the dominant
+term (0.62) in `computeStoryScore()` (`story-ranking.js`).
+
+Each language keeps the same category groupings as the English list
+(political, war, disaster, economic, corporate, tech, sports, deaths) so
+the calibration history above still applies per-category regardless of
+language. Institutional acronyms (RBI, GDP, IPO, CEO, AI) stay in Latin
+script in every language's list - that's how they actually appear in real
+regional-language news text, not an untranslated gap.
+
+The hi/gu/bn/kn/mr/ml/ta/te/or lists are DRAFT machine-assisted
+translations, not reviewed by native speakers - same caveat as the
+frontend's own bn/kn/mr/ml/ta/te/or locale files
+(`news-khabri`'s `src/i18n/locales/bn.ts`). To extend an existing list or
+add a new language, add an entry to `IMPORTANCE_KEYWORDS` in
+`ranking-config.js` following the same category grouping, then re-run
+`ranking.test.js`'s per-language `computeImportance` cases against a few
+real recent headlines in that language before trusting the calibration.
+
 ## Single-company stock-price penalty pattern
 
 `IMPORTANCE_PENALIZE_PATTERNS` targets single-company stock-price-movement

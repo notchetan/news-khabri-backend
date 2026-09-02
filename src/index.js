@@ -13,6 +13,8 @@ const { sendTrendingNotifications } = require('./services/push-notifications');
 const articlesRouter = require('./routes/articles');
 const storiesRouter = require('./routes/stories');
 const pushRouter = require('./routes/push');
+const authRouter = require('./routes/auth');
+const readsRouter = require('./routes/reads');
 
 const app = express();
 app.use(cors());
@@ -20,6 +22,8 @@ app.use(express.json());
 app.use(articlesRouter);
 app.use(storiesRouter);
 app.use(pushRouter);
+app.use(authRouter);
+app.use(readsRouter);
 
 async function refreshSourcesAndFetch() {
   const discovered = await discoverAllSources();

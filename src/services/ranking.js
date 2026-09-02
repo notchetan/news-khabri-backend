@@ -54,11 +54,16 @@ function computeImportance(article) {
     .join(' ')
     .toLowerCase();
 
+  // IMPORTANCE_KEYWORDS is now per-language (see ranking-config.js's own
+  // comment) - an article whose language isn't in the map yet (or has none
+  // set) falls back to the English list rather than matching nothing.
+  const keywords = IMPORTANCE_KEYWORDS[article.language] || IMPORTANCE_KEYWORDS.en;
+
   let score = IMPORTANCE_BASELINE;
-  for (const keyword of matchedKeywords(text, IMPORTANCE_KEYWORDS.boost)) {
+  for (const keyword of matchedKeywords(text, keywords.boost)) {
     score += IMPORTANCE_BOOST_WEIGHT;
   }
-  for (const keyword of matchedKeywords(text, IMPORTANCE_KEYWORDS.penalize)) {
+  for (const keyword of matchedKeywords(text, keywords.penalize)) {
     score -= IMPORTANCE_PENALIZE_WEIGHT;
   }
   for (const pattern of IMPORTANCE_PENALIZE_PATTERNS) {

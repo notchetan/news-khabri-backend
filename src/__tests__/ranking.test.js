@@ -170,6 +170,40 @@ describe('computeImportance', () => {
     // the shares/stock-percentage pattern either - just neutral-or-above.
     expect(marketWide).toBeGreaterThanOrEqual(IMPORTANCE_BASELINE);
   });
+
+  // IMPORTANCE_KEYWORDS is per-language (ranking-config.js) - before this,
+  // a non-English article could never match anything and always scored
+  // exactly IMPORTANCE_BASELINE regardless of its actual newsworthiness.
+  test.each([
+    ['hi', 'भूकंप से दर्जनों की मौत, सरकार ने आपातकाल घोषित किया'],
+    ['gu', 'ભૂકંપથી અનેકના મોત, સરકારે કટોકટી જાહેર કરી'],
+    ['bn', 'ভূমিকম্পে বহু মৃত্যু, সরকার জরুরি অবস্থা ঘোষণা করল'],
+    ['kn', 'ಭೂಕಂಪದಲ್ಲಿ ಹಲವರು ಸಾವು, ಸರ್ಕಾರ ತುರ್ತು ಪರಿಸ್ಥಿತಿ ಘೋಷಿಸಿದೆ'],
+    ['mr', 'भूकंपात अनेकांचा मृत्यू, सरकारने आणीबाणी जाहीर केली'],
+    ['ml', 'ഭൂകമ്പത്തിൽ നിരവധി പേർ മരിച്ചു, സർക്കാർ അടിയന്തരാവസ്ഥ പ്രഖ്യാപിച്ചു'],
+    ['ta', 'நிலநடுக்கத்தில் பலர் உயிரிழப்பு, அரசு அவசரநிலை அறிவிப்பு'],
+    ['te', 'భూకంపంలో పలువురు మృతి, ప్రభుత్వం అత్యవసర పరిస్థితి ప్రకటించింది'],
+    ['or', 'ଭୂକମ୍ପରେ ଅନେକଙ୍କ ମୃତ୍ୟୁ, ସରକାର ଜରୁରୀକାଳୀନ ପରିସ୍ଥିତି ଘୋଷଣା କରିଛନ୍ତି'],
+  ])('scores a major-event headline above baseline in %s', (language, title) => {
+    const score = computeImportance({ title, description: '', category: '', language });
+    expect(score).toBeGreaterThan(IMPORTANCE_BASELINE);
+  });
+
+  test('falls back to the English list for an unrecognized/missing language', () => {
+    const withUnknownLanguage = computeImportance({
+      title: 'Earthquake kills dozens, government declares emergency',
+      description: '',
+      category: '',
+      language: 'xx',
+    });
+    const withNoLanguage = computeImportance({
+      title: 'Earthquake kills dozens, government declares emergency',
+      description: '',
+      category: '',
+    });
+    expect(withUnknownLanguage).toBeGreaterThan(IMPORTANCE_BASELINE);
+    expect(withUnknownLanguage).toBe(withNoLanguage);
+  });
 });
 
 describe('computeRankingScore', () => {

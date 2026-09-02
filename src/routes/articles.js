@@ -1,5 +1,6 @@
 const express = require('express');
 const db = require('../db');
+const { syncArticleFts, buildFtsQuery } = require('../db/fts');
 const { rankArticles, computeRankingScore } = require('../services/ranking');
 const {
   CANDIDATE_POOL_SIZE,
@@ -47,11 +48,27 @@ router.get('/articles', (req, res) => {
   // Cursor pagination (fetched_at, id) instead of OFFSET: the fetch cron
   // inserts new rows every 15 minutes, which shifts numeric offsets underneath
   // an in-progress scroll and produces duplicate/skipped rows across pages.
-  // A cursor anchored to a specific row is immune to that.
+  // A cursor anchored to a specific row is immune to that. Search results
+  // keep this exact same chronological ordering/cursor (not BM25 relevance
+  // order) specifically so this pagination contract stays valid whether or
+  // not `search` is present - see docs/search.md.
   const { conditions, params } = buildLanguageCategoryConditions(language, category, sources);
+  // Full-text search over title/description/content (articles_fts, kept in
+  // sync by db/fts.js's syncArticleFts) instead of the old `title LIKE
+  // '%search%'` - see docs/search.md.
+  let joinFts = false;
   if (search) {
-    conditions.push('title LIKE ?');
-    params.push(`%${search}%`);
+    const ftsQuery = buildFtsQuery(search);
+    if (!ftsQuery) {
+      // Every character was FTS5 query syntax (e.g. a search of only
+      // punctuation) - nothing can match that, so short-circuit rather
+      // than asking SQLite to evaluate an empty MATCH.
+      res.json([]);
+      return;
+    }
+    joinFts = true;
+    conditions.push('articles_fts MATCH ?');
+    params.push(ftsQuery);
   }
   if (cursor) {
     const [cursorFetchedAt, cursorId] = String(cursor).split('|');
@@ -59,9 +76,10 @@ router.get('/articles', (req, res) => {
     params.push(cursorFetchedAt, cursorFetchedAt, Number(cursorId));
   }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const from = joinFts ? 'articles JOIN articles_fts ON articles_fts.rowid = articles.id' : 'articles';
 
   const rows = db
-    .prepare(`SELECT * FROM articles ${where} ORDER BY fetched_at DESC, id DESC LIMIT ?`)
+    .prepare(`SELECT articles.* FROM ${from} ${where} ORDER BY fetched_at DESC, id DESC LIMIT ?`)
     .all(...params, limit);
 
   // Order here stays chronological/relevance-based (this is not the ranked
@@ -119,6 +137,7 @@ router.get('/articles/:id', async (req, res) => {
         db.prepare(
           'UPDATE articles SET content = ?, image_caption = ?, read_time_minutes = ? WHERE id = ?'
         ).run(scraped.content, scraped.imageCaption, scraped.readTimeMinutes, article.id);
+        syncArticleFts(article.id);
         article.content = scraped.content;
         article.image_caption = scraped.imageCaption;
         article.read_time_minutes = scraped.readTimeMinutes;

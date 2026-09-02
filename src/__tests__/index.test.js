@@ -6,6 +6,7 @@ jest.mock('../ingestion/article-scraper');
 
 const request = require('supertest');
 const db = require('../db');
+const { syncArticleFts } = require('../db/fts');
 const { setSources } = require('../ingestion/source-registry');
 const { scrapeArticle } = require('../ingestion/article-scraper');
 const app = require('../index');
@@ -31,11 +32,17 @@ function insertArticle(overrides = {}) {
     `INSERT INTO articles (id, title, link, source, category, published_at, image_url, fetched_at, content, image_caption, read_time_minutes, language, description)
      VALUES (@id, @title, @link, @source, @category, @published_at, @image_url, @fetched_at, @content, @image_caption, @read_time_minutes, @language, @description)`
   ).run(article);
+  // This test helper writes directly to `articles`, bypassing
+  // ingestion/fetcher.js's own insert - keep articles_fts in sync the same
+  // way that real insert path does, so the GET /articles search tests below
+  // exercise real FTS5 matching rather than a table nothing ever populated.
+  syncArticleFts(article.id);
   return article;
 }
 
 beforeEach(() => {
   db.exec('DELETE FROM articles');
+  db.exec('DELETE FROM articles_fts');
   setSources([]);
   jest.clearAllMocks();
 });
@@ -133,6 +140,66 @@ describe('GET /articles', () => {
 
     const res = await request(app).get('/articles?search=market&category=business');
     expect(res.body.map((a) => a.id)).toEqual([1]);
+  });
+
+  test('matches on description, not just title - the old LIKE query could not do this', async () => {
+    insertArticle({
+      id: 1,
+      title: 'Central bank meets today',
+      description: 'The RBI is expected to announce a rate decision',
+    });
+    insertArticle({ id: 2, title: 'Cricket team wins series', description: null });
+
+    const res = await request(app).get('/articles?search=rbi');
+    expect(res.body.map((a) => a.id)).toEqual([1]);
+  });
+
+  test('matches on content', async () => {
+    insertArticle({ id: 1, title: 'Neutral headline', content: 'Full report on the earthquake damage' });
+    insertArticle({ id: 2, title: 'Different story', content: 'Nothing related here' });
+
+    const res = await request(app).get('/articles?search=earthquake');
+    expect(res.body.map((a) => a.id)).toEqual([1]);
+  });
+
+  test('prefix-matches a partial word rather than requiring the exact full word', async () => {
+    insertArticle({ id: 1, title: 'Government announces new education policy' });
+    insertArticle({ id: 2, title: 'Cricket team wins series' });
+
+    const res = await request(app).get('/articles?search=educ');
+    expect(res.body.map((a) => a.id)).toEqual([1]);
+  });
+
+  test('requires every search word to match (implicit AND across words)', async () => {
+    insertArticle({ id: 1, title: 'Election results announced for the state government' });
+    insertArticle({ id: 2, title: 'Election day turnout breaks records' });
+
+    const res = await request(app).get('/articles?search=election%20government');
+    expect(res.body.map((a) => a.id)).toEqual([1]);
+  });
+
+  test('returns no results (not an error) for a search of only punctuation', async () => {
+    insertArticle({ id: 1, title: 'Some headline' });
+
+    const res = await request(app).get(`/articles?search=${encodeURIComponent('***')}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  test('cursor pagination still works correctly when combined with search', async () => {
+    for (let i = 1; i <= 3; i++) {
+      insertArticle({ id: i, title: 'Budget announcement', fetched_at: `2026-08-25 10:0${i}:00` });
+    }
+
+    const page1 = await request(app).get('/articles?search=budget&limit=2');
+    expect(page1.body.map((a) => a.id)).toEqual([3, 2]);
+
+    const last = page1.body[page1.body.length - 1];
+    const cursor = `${last.fetched_at}|${last.id}`;
+    const page2 = await request(app).get(
+      `/articles?search=budget&limit=2&cursor=${encodeURIComponent(cursor)}`
+    );
+    expect(page2.body.map((a) => a.id)).toEqual([1]);
   });
 
   test('returns everything when search is absent (no regression)', async () => {
