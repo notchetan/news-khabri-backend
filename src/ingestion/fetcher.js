@@ -10,6 +10,7 @@ const parser = new Parser({
 const db = require('../db');
 const { getSources } = require('./source-registry');
 const { toThumbnailUrl } = require('../services/image-thumbnail');
+const { syncArticleFts } = require('../db/fts');
 
 // See "URL normalization for dedup" in docs/fetcher.md.
 const TRACKING_PARAMS = [
@@ -86,6 +87,10 @@ const insert = db.prepare(`
   ON CONFLICT(link) DO UPDATE SET image_url = excluded.image_url
     WHERE articles.image_url IS NULL AND excluded.image_url IS NOT NULL
 `);
+// link is UNIQUE, so this reliably finds the row insert.run() just touched
+// whether it was a fresh INSERT or the ON CONFLICT UPDATE path above -
+// insert.run()'s own lastInsertRowid isn't meaningful on that UPDATE path.
+const findIdByLink = db.prepare('SELECT id FROM articles WHERE link = ?');
 
 // See "fetchAllFeeds's sourceNameFilter" in docs/fetcher.md.
 async function fetchAllFeeds(sourceNameFilter) {
@@ -112,6 +117,8 @@ async function fetchAllFeeds(sourceNameFilter) {
           language: src.language || 'en',
           description: extractDescription(item),
         });
+        const { id } = findIdByLink.get(link);
+        syncArticleFts(id);
       }
       console.log(`Fetched ${feed.items.length} from ${src.name}`);
     } catch (err) {

@@ -37,9 +37,35 @@ describe('computeStoryScore', () => {
         sourceCountSignal: expect.any(Number),
         recencySignal: expect.any(Number),
         momentumSignal: expect.any(Number),
+        personalizationSignal: expect.any(Number),
         distinctSourceCount: expect.any(Number),
       })
     );
+  });
+
+  test('personalizationSignal is 0 when readProfile is omitted or explicitly null - anonymous/first-time-signed-in requests are unaffected', () => {
+    const omitted = computeStoryScore(makeStory(), [makeArticle()], NOW);
+    const explicitNull = computeStoryScore(makeStory(), [makeArticle()], NOW, null);
+    expect(omitted.personalizationSignal).toBe(0);
+    expect(explicitNull.personalizationSignal).toBe(0);
+    expect(omitted.score).toBe(explicitNull.score);
+  });
+
+  test('a matching readProfile raises the score above the same story with no profile', () => {
+    const story = makeStory({ category: 'business' });
+    const members = [makeArticle({ source: 'The Hindu' })];
+    const readProfile = {
+      categoryCounts: new Map([['business', 5]]),
+      sourceCounts: new Map([['The Hindu', 5]]),
+      entities: new Set(),
+      totalReads: 5,
+    };
+
+    const withProfile = computeStoryScore(story, members, NOW, readProfile);
+    const withoutProfile = computeStoryScore(story, members, NOW);
+
+    expect(withProfile.personalizationSignal).toBeGreaterThan(0);
+    expect(withProfile.score).toBeGreaterThan(withoutProfile.score);
   });
 
   test('bestArticleScore is the maximum member score, not an average', () => {
@@ -143,8 +169,49 @@ describe('rankStories', () => {
         story_score_sourceCount: expect.any(Number),
         story_score_recency: expect.any(Number),
         story_score_momentum: expect.any(Number),
+        story_score_personalization: expect.any(Number),
       })
     );
+  });
+
+  test('omitting readProfile vs. passing an empty pool of stories with no history produces the same order as before personalization existed', () => {
+    const stories = [
+      makeStory({ id: 1, latest_published_at: hoursAgo(2) }),
+      makeStory({ id: 2, latest_published_at: NOW.toISOString() }),
+    ];
+    const members = new Map([
+      [1, [makeArticle({ id: 1, published_at: hoursAgo(2) })]],
+      [2, [makeArticle({ id: 2, published_at: NOW.toISOString() })]],
+    ]);
+
+    const withoutReadProfile = rankStories(stories, members, { now: NOW });
+    const withNullReadProfile = rankStories(stories, members, { now: NOW, readProfile: null });
+
+    expect(withoutReadProfile.map((s) => s.id)).toEqual(withNullReadProfile.map((s) => s.id));
+    expect(withoutReadProfile.map((s) => s.story_score)).toEqual(withNullReadProfile.map((s) => s.story_score));
+  });
+
+  test('a readProfile can change the ranked order - a personalized match overtakes an otherwise-fresher story', () => {
+    // Nearly identical otherwise (freshness/importance), so the only real
+    // lever left to flip their order is the personalization signal.
+    const matching = makeStory({ id: 1, category: 'business', latest_published_at: hoursAgo(1) });
+    const fresher = makeStory({ id: 2, category: 'sports', latest_published_at: NOW.toISOString() });
+    const members = new Map([
+      [1, [makeArticle({ id: 1, source: 'The Hindu', category: 'business', published_at: hoursAgo(1) })]],
+      [2, [makeArticle({ id: 2, source: 'The Hindu', category: 'sports', published_at: NOW.toISOString() })]],
+    ]);
+    const readProfile = {
+      categoryCounts: new Map([['business', 20]]),
+      sourceCounts: new Map([['The Hindu', 20]]),
+      entities: new Set(),
+      totalReads: 20,
+    };
+
+    const withoutProfile = rankStories([matching, fresher], members, { now: NOW });
+    expect(withoutProfile.map((s) => s.id)).toEqual([2, 1]); // fresher wins with no personalization
+
+    const withProfile = rankStories([matching, fresher], members, { now: NOW, readProfile });
+    expect(withProfile.map((s) => s.id)).toEqual([1, 2]); // matching overtakes it once personalized
   });
 
   test('respects the limit option', () => {

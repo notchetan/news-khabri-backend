@@ -98,12 +98,20 @@ const MOMENTUM_SATURATION = 3;
 // How recently a member must have been published to count toward momentum.
 const MOMENTUM_WINDOW_HOURS = 3;
 // Must sum to ~1. See docs/clustering-tuning.md for why this is
-// deliberately dominated by bestArticle.
+// deliberately dominated by bestArticle. `personalization` (see
+// docs/personalization.md) is 0 for anonymous requests and first-time
+// signed-in users with no read history yet, so their ranking order is
+// unaffected by this term being present at all - the other four weights
+// were scaled down proportionally from their pre-personalization values
+// (0.62/0.2/0.1/0.08) to make room for it, not adjusted individually,
+// specifically so that uniform scaling (which preserves relative ranking
+// order exactly) is what changed, not the balance between them.
 const STORY_SCORE_WEIGHTS = {
-  bestArticle: 0.62,
-  sourceCount: 0.2,
-  recency: 0.1,
-  momentum: 0.08,
+  bestArticle: 0.56,
+  sourceCount: 0.18,
+  recency: 0.09,
+  momentum: 0.07,
+  personalization: 0.1,
 };
 const DEFAULT_TOP_STORIES_LIMIT = 20;
 // How many active stories the /stories/top route pulls as a ranking pool
