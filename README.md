@@ -38,21 +38,33 @@ npm install
 node src/index.js
 ```
 
-The server listens on port 3000. On first boot it discovers sources,
-does a full fetch, and schedules the recurring cron jobs (daily source
-rediscovery, per-tier fetches, daily tier recompute) — see `src/index.js`.
+The server listens on `PORT` (default 3000). On first boot it discovers
+sources, does a full fetch, and schedules the recurring cron jobs (daily
+source rediscovery, per-tier fetches, daily tier recompute) — see
+`src/index.js`. `GET /healthz` is an unauthenticated liveness probe. On
+`SIGTERM`/`SIGINT` the server drains its listener and closes the database
+before exiting.
 
 ### Environment variables
 
+See `.env.example`. `GOOGLE_WEB_CLIENT_ID` and `JWT_SECRET` are required
+in any non-test run (`JWT_SECRET` throws at startup if unset); the rest
+are optional.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DB_PATH` | `articles.db` | SQLite database file path. |
-| `NODE_ENV` | - | Set to `production` to disable the `?debug=true` ranking-breakdown param on `/stories/top`. |
+| `GOOGLE_WEB_CLIENT_ID` | — | Web OAuth client ID; the `audience` a Google ID token is verified against. |
+| `JWT_SECRET` | — | Secret for signing this app's own session tokens. Required outside tests. |
+| `PORT` | `3000` | Port to listen on. |
+| `DB_PATH` | `articles.db` | SQLite database file path. Point at a mounted volume on a container host. |
+| `CORS_ORIGIN` | — | Comma-separated allowed origins. Unset reflects any origin. |
+| `ENABLE_RANKING_DEBUG` | — | Set to `true` to allow `?debug=true` on `/stories/top`. Never set in production. |
 
 ## API
 
 | Route | Description |
 | --- | --- |
+| `GET /healthz` | Liveness probe (`{ status, uptime }`), no auth. |
 | `GET /articles` | Paginated article feed (`language`, `category`, `cursor`, `search`, `limit`). |
 | `GET /articles/top` | Ranked ("Top Stories") article feed. |
 | `GET /articles/:id` | Single article, with related articles. |

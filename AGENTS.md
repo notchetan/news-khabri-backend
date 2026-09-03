@@ -115,6 +115,23 @@ port binding, no cron timers running during a test suite. Keep any new
 top-level side effect inside that same guard, or a test importing this
 file will trigger it.
 
+The listener itself (still inside that guard) reads `PORT` from the
+environment and installs a `SIGTERM`/`SIGINT` handler that `server.close()`s
+and `db.close()`s before exit, with a 10s force-exit fallback.
+
+## App-level middleware: helmet, CORS allowlist, rate limits, `/healthz`
+
+`app` (module scope, so route tests see it too) is wrapped in `helmet()`,
+a `cors()` whose origin comes from `CORS_ORIGIN` (comma-separated; unset =
+reflect any origin), `express.json({ limit: '16kb' })`, and two
+`express-rate-limit` instances — a 600/15min global limiter and a 30/15min
+limiter on `POST /auth/google` specifically. **Both limiters `skip` when
+`NODE_ENV === 'test'`** so the suite's many sequential requests from one
+address don't trip them; a test that needs to exercise limiting has to
+opt back in itself. `GET /healthz` (`{ status, uptime }`, no auth) is
+registered *before* the global limiter so a monitor pinging it can't be
+throttled.
+
 ## Graceful degradation over throwing, for optional signals
 
 `services/embeddings.js`'s `getEmbedding` never throws — a failed model

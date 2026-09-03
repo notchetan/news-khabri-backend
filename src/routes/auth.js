@@ -48,7 +48,10 @@ router.post('/auth/google', async (req, res) => {
   try {
     identity = await verifyGoogleIdToken(idToken);
   } catch (err) {
-    res.status(401).json({ error: 'Invalid Google ID token', message: err.message });
+    // Log the real reason server-side; don't hand Google-library internals
+    // back to the caller.
+    console.warn('Google ID token verification failed:', err.message);
+    res.status(401).json({ error: 'Invalid Google ID token' });
     return;
   }
 

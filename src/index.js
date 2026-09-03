@@ -3,6 +3,9 @@ require('dotenv').config({ quiet: true });
 const express = require('express');
 const cron = require('node-cron');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const db = require('./db');
 const fetchAllFeeds = require('./ingestion/fetcher');
 const { discoverAllSources } = require('./ingestion/discovery');
 const { setSources, getSources } = require('./ingestion/source-registry');
@@ -18,8 +21,45 @@ const readsRouter = require('./routes/reads');
 const bookmarksRouter = require('./routes/bookmarks');
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.set('trust proxy', 1); // behind a PaaS load balancer - needed for correct client IPs / rate limiting.
+app.disable('x-powered-by');
+app.use(helmet());
+
+// CORS_ORIGIN is a comma-separated allowlist; unset means "reflect any
+// origin" (fine for the native app, which isn't subject to CORS anyway -
+// lock this down once a web origin exists).
+const corsOrigin = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  : true;
+app.use(cors({ origin: corsOrigin }));
+
+// Every request body here is tiny (an id, a token, one preference bundle).
+app.use(express.json({ limit: '16kb' }));
+
+// Liveness/readiness probe for the host and uptime monitors - before the
+// rate limiter so a monitor pinging every few seconds never trips it.
+app.get('/healthz', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// Rate limiting is off under NODE_ENV=test - the suite fires many
+// sequential requests from one address and isn't what these limits are
+// for.
+const rateLimitingDisabled = process.env.NODE_ENV === 'test';
+const limiterBase = {
+  windowMs: 15 * 60 * 1000,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skip: () => rateLimitingDisabled,
+};
+const globalLimiter = rateLimit({ ...limiterBase, limit: 600 });
+// Stricter: /auth/google verifies a Google token and can create an
+// account, and Google's verification endpoint has its own quota.
+const authLimiter = rateLimit({ ...limiterBase, limit: 30 });
+
+app.use(globalLimiter);
+app.use('/auth/google', authLimiter);
+
 app.use(articlesRouter);
 app.use(storiesRouter);
 app.use(pushRouter);
@@ -74,8 +114,23 @@ if (require.main === module) {
   // isDue), so this doesn't over-notify anyone on a longer interval.
   cron.schedule('*/5 * * * *', () => sendTrendingNotifications());
 
-  const PORT = 3000;
-  app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
+  const PORT = process.env.PORT || 3000;
+  const server = app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
+
+  // Close the listener and the DB handle on a host stop signal instead of
+  // being killed mid-write; force-exit if it hasn't happened in 10s.
+  const shutdown = (signal) => {
+    console.log(`${signal} received - shutting down`);
+    server.close(() => {
+      db.close();
+      process.exit(0);
+    });
+    setTimeout(() => {
+      console.error('Shutdown timed out - forcing exit');
+      process.exit(1);
+    }, 10000).unref();
+  };
+  ['SIGTERM', 'SIGINT'].forEach((sig) => process.on(sig, () => shutdown(sig)));
 }
 
 module.exports = app;

@@ -507,3 +507,12 @@ describe('GET /sources', () => {
     expect(res.body).toEqual([]);
   });
 });
+
+describe('GET /healthz', () => {
+  test('reports ok without touching the database or auth', async () => {
+    const res = await request(app).get('/healthz');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ok');
+    expect(typeof res.body.uptime).toBe('number');
+  });
+});
