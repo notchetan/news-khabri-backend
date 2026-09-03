@@ -1,9 +1,21 @@
 const express = require('express');
+const { z } = require('zod');
 const db = require('../db');
 const { verifyGoogleIdToken, signSessionToken } = require('../services/auth');
 const requireAuth = require('../middleware/require-auth');
+const validate = require('../middleware/validate');
 
 const router = express.Router();
+
+const googleAuthBody = z.object({ idToken: z.string().min(1) });
+const preferencesBody = z.object({
+  theme: z.string().optional(),
+  fontSize: z.string().optional(),
+  language: z.string().optional(),
+  debugEnabled: z.boolean().optional(),
+  sources: z.record(z.string(), z.array(z.string())).optional(),
+  notificationInterval: z.number().optional(),
+});
 
 const upsertUser = db.prepare(`
   INSERT INTO users (google_id, email, name, avatar_url)
@@ -37,12 +49,8 @@ function toPreferencesResponse(row) {
 // @react-native-google-signin/google-signin, creates or updates the
 // matching account, and issues this app's own session token - the app
 // never sends the Google token again after this, only the returned one.
-router.post('/auth/google', async (req, res) => {
+router.post('/auth/google', validate({ body: googleAuthBody }), async (req, res) => {
   const { idToken } = req.body;
-  if (typeof idToken !== 'string' || !idToken) {
-    res.status(400).json({ error: 'idToken is required' });
-    return;
-  }
 
   let identity;
   try {
@@ -96,7 +104,7 @@ const upsertPreferences = db.prepare(`
 // A client that still sends the whole bundle behaves exactly as before.
 const PREF_FIELDS = ['theme', 'fontSize', 'language', 'debugEnabled', 'sources', 'notificationInterval'];
 
-router.put('/me/preferences', requireAuth, (req, res) => {
+router.put('/me/preferences', requireAuth, validate({ body: preferencesBody }), (req, res) => {
   const body = req.body || {};
   const current = toPreferencesResponse(getPreferences.get(req.userId)) || {
     theme: null,

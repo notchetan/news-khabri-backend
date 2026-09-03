@@ -1,5 +1,7 @@
 const express = require('express');
+const { z } = require('zod');
 const db = require('../db');
+const validate = require('../middleware/validate');
 const { rankStories, computeStoryScore } = require('../services/story-ranking');
 const { loadReadProfile } = require('../services/personalization');
 const { verifySessionToken } = require('../services/auth');
@@ -14,6 +16,8 @@ const router = express.Router();
 
 const REPRESENTATIVE_FIELDS = 'id, title, link, source, image_url, published_at';
 const MEMBER_FIELDS = 'id, title, link, source, image_url, published_at, language';
+// Feed query params stay leniently parsed below; only :id is strict.
+const numericIdParam = z.object({ id: z.string().regex(/^\d+$/) });
 
 // Opt-in, not opt-out: the ?debug=true score breakdown is only ever
 // exposed when ENABLE_RANKING_DEBUG is explicitly "true". Keying it off
@@ -150,7 +154,7 @@ router.get('/stories/top', (req, res) => {
   res.json(ranked.map((story) => toStoryResponse(story, membersByStoryId, { debug, readProfile })));
 });
 
-router.get('/stories/:id', (req, res) => {
+router.get('/stories/:id', validate({ params: numericIdParam }), (req, res) => {
   const story = resolveActiveStory(req.params.id);
   if (!story) {
     res.status(404).json({ error: 'Story not found' });
