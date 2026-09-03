@@ -270,13 +270,14 @@ describe('GET /stories/:id', () => {
 });
 
 describe('debug output gating', () => {
-  const originalNodeEnv = process.env.NODE_ENV;
+  const original = process.env.ENABLE_RANKING_DEBUG;
   afterEach(() => {
-    process.env.NODE_ENV = originalNodeEnv;
+    if (original === undefined) delete process.env.ENABLE_RANKING_DEBUG;
+    else process.env.ENABLE_RANKING_DEBUG = original;
   });
 
-  test('debug=true is ignored (no scoreBreakdown) when NODE_ENV is production', async () => {
-    process.env.NODE_ENV = 'production';
+  test('debug=true is ignored (no scoreBreakdown) unless ENABLE_RANKING_DEBUG is set', async () => {
+    delete process.env.ENABLE_RANKING_DEBUG;
     const storyId = insertStory();
     insertArticle({ id: 1, story_id: storyId });
     db.prepare('UPDATE stories SET representative_article_id = 1 WHERE id = ?').run(storyId);
@@ -285,8 +286,8 @@ describe('debug output gating', () => {
     expect(res.body[0].scoreBreakdown).toBeUndefined();
   });
 
-  test('debug=true includes a scoreBreakdown when NODE_ENV is not production', async () => {
-    process.env.NODE_ENV = 'test';
+  test('debug=true includes a scoreBreakdown when ENABLE_RANKING_DEBUG is "true"', async () => {
+    process.env.ENABLE_RANKING_DEBUG = 'true';
     const storyId = insertStory();
     insertArticle({ id: 1, story_id: storyId });
     db.prepare('UPDATE stories SET representative_article_id = 1 WHERE id = ?').run(storyId);

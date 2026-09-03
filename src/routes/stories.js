@@ -15,8 +15,12 @@ const router = express.Router();
 const REPRESENTATIVE_FIELDS = 'id, title, link, source, image_url, published_at';
 const MEMBER_FIELDS = 'id, title, link, source, image_url, published_at, language';
 
+// Opt-in, not opt-out: the ?debug=true score breakdown is only ever
+// exposed when ENABLE_RANKING_DEBUG is explicitly "true". Keying it off
+// `NODE_ENV !== 'production'` meant an unset NODE_ENV in a real deployment
+// silently left it on.
 function isDebugAllowed(req) {
-  return req.query.debug === 'true' && process.env.NODE_ENV !== 'production';
+  return req.query.debug === 'true' && process.env.ENABLE_RANKING_DEBUG === 'true';
 }
 
 // Distinct from requireAuth (middleware/require-auth.js) - /stories/top
