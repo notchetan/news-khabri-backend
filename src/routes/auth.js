@@ -108,4 +108,27 @@ router.put('/me/preferences', requireAuth, (req, res) => {
   res.json({ preferences: toPreferencesResponse(getPreferences.get(req.userId)) });
 });
 
+// Full account deletion - required by the app stores for any app with
+// account creation (Apple guideline 5.1.1(v)). Foreign keys are enforced
+// (better-sqlite3 default) with no ON DELETE CASCADE, so every table that
+// references the user is cleared explicitly, child rows before the users
+// row, in one transaction. push_subscriptions is keyed by device token,
+// not user_id, so it isn't touched here - a deleted account simply stops
+// being able to sign in; its device keeps whatever notification cadence
+// it set until it changes it.
+const deleteAccount = db.transaction((userId) => {
+  db.prepare('DELETE FROM read_events WHERE user_id = ?').run(userId);
+  db.prepare('DELETE FROM bookmarks WHERE user_id = ?').run(userId);
+  db.prepare('DELETE FROM user_preferences WHERE user_id = ?').run(userId);
+  db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+});
+
+router.delete('/me', requireAuth, (req, res) => {
+  deleteAccount(req.userId);
+  // The session token stays cryptographically valid until it expires, but
+  // every authed route 404s once the user row is gone, and the app clears
+  // its own stored token on a successful delete.
+  res.status(204).end();
+});
+
 module.exports = router;
