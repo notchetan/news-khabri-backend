@@ -110,6 +110,9 @@ db.exec(`
   )
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_stories_lang_cat_latest ON stories(language, category, latest_published_at)');
+// /stories/top and the push cron pool candidates by (status, language,
+// updated_at DESC) - see routes/stories.js.
+db.exec('CREATE INDEX IF NOT EXISTS idx_stories_status_lang_updated ON stories(status, language, updated_at)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_articles_story_id ON articles(story_id)');
 
 const storyColumns = db.prepare('PRAGMA table_info(stories)').all();

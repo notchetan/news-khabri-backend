@@ -12,7 +12,9 @@ const expo = new Expo();
 // docs/push-notifications.md.
 function getTopStory(language) {
   const candidates = db
-    .prepare("SELECT * FROM stories WHERE status = 'active' AND language = ? ORDER BY id DESC LIMIT ?")
+    .prepare(
+      "SELECT * FROM stories WHERE status = 'active' AND language = ? ORDER BY updated_at DESC, id DESC LIMIT ?"
+    )
     .all(language, STORY_FEED_POOL_SIZE);
   if (candidates.length === 0) return null;
 

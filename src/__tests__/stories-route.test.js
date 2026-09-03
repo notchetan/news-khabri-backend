@@ -231,6 +231,30 @@ describe('GET /stories/top', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
+
+  test('keeps an older story with recent activity in the candidate pool (pooled by updated_at, not id)', async () => {
+    const { STORY_FEED_POOL_SIZE } = require('../services/clustering-config');
+
+    // The oldest story (lowest id) - would sit last under `ORDER BY id DESC`.
+    const oldStoryId = insertStory({ title: 'Old but still developing', latest_title: 'Old but still developing' });
+    insertArticle({ id: 1, story_id: oldStoryId, title: 'Old but still developing' });
+    db.prepare('UPDATE stories SET representative_article_id = 1 WHERE id = ?').run(oldStoryId);
+
+    // Enough newer, quiet stories to completely fill the pool by id.
+    let nextArticleId = 2;
+    for (let i = 0; i < STORY_FEED_POOL_SIZE; i++) {
+      const sid = insertStory({ title: `Quiet story ${i}`, latest_title: `Quiet story ${i}` });
+      insertArticle({ id: nextArticleId, story_id: sid, title: `Quiet story ${i}` });
+      db.prepare('UPDATE stories SET representative_article_id = ? WHERE id = ?').run(nextArticleId, sid);
+      nextArticleId += 1;
+    }
+
+    // The old story just gained fresh coverage - its updated_at is now the newest.
+    db.prepare("UPDATE stories SET updated_at = datetime('now', '+1 hour') WHERE id = ?").run(oldStoryId);
+
+    const res = await request(app).get('/stories/top?limit=100');
+    expect(res.body.map((s) => s.id)).toContain(oldStoryId);
+  });
 });
 
 describe('GET /stories/:id', () => {
