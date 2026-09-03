@@ -317,16 +317,21 @@ describe('GET /articles/:id', () => {
     expect(res.body).toEqual({ error: 'Article not found' });
   });
 
-  test('does not call the scraper when content is already cached', async () => {
-    insertArticle({ id: 1, content: '<p>Already scraped.</p>' });
+  test('never returns the scraped full body, even when one is cached', async () => {
+    insertArticle({
+      id: 1,
+      content: '<p>The whole article body.</p>',
+      description: 'A one-line summary.',
+    });
 
     const res = await request(app).get('/articles/1');
     expect(res.status).toBe(200);
-    expect(res.body.content).toBe('<p>Already scraped.</p>');
+    expect(res.body).not.toHaveProperty('content');
+    expect(res.body.description).toBe('A one-line summary.');
     expect(scrapeArticle).not.toHaveBeenCalled();
   });
 
-  test('scrapes and persists content when not yet cached', async () => {
+  test('kicks off a background content backfill for search when not yet scraped, without blocking the response', async () => {
     insertArticle({ id: 1, link: 'https://example.com/1', content: null });
     scrapeArticle.mockResolvedValue({
       content: '<p>Fresh.</p>',
@@ -336,32 +341,26 @@ describe('GET /articles/:id', () => {
 
     const res = await request(app).get('/articles/1');
     expect(res.status).toBe(200);
-    expect(res.body.content).toBe('<p>Fresh.</p>');
-    expect(res.body.image_caption).toBe('Credit: Someone');
-    expect(res.body.read_time_minutes).toBe(3);
+    expect(res.body).not.toHaveProperty('content');
     expect(scrapeArticle).toHaveBeenCalledWith('https://example.com/1');
 
-    const stored = db.prepare('SELECT content, image_caption, read_time_minutes FROM articles WHERE id = ?').get(1);
+    // The backfill runs after the response - let its promise chain settle.
+    await new Promise((resolve) => setImmediate(resolve));
+    const stored = db
+      .prepare('SELECT content, read_time_minutes FROM articles WHERE id = ?')
+      .get(1);
     expect(stored.content).toBe('<p>Fresh.</p>');
     expect(stored.read_time_minutes).toBe(3);
   });
 
-  test('returns the article gracefully (content stays null) when scraping fails', async () => {
+  test('still returns 200 when the background scrape rejects', async () => {
     insertArticle({ id: 1, content: null });
     scrapeArticle.mockRejectedValue(new Error('network error'));
 
     const res = await request(app).get('/articles/1');
     expect(res.status).toBe(200);
-    expect(res.body.content).toBeNull();
-  });
-
-  test('returns the article gracefully when the scraper returns null', async () => {
-    insertArticle({ id: 1, content: null });
-    scrapeArticle.mockResolvedValue(null);
-
-    const res = await request(app).get('/articles/1');
-    expect(res.status).toBe(200);
-    expect(res.body.content).toBeNull();
+    expect(res.body).not.toHaveProperty('content');
+    await new Promise((resolve) => setImmediate(resolve));
   });
 
   test('related articles are same category and language, excluding the article itself', async () => {
