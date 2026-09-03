@@ -4,6 +4,20 @@ Fetches an article's original page and extracts its main content (with
 inline images) via Readability - the same extraction Firefox Reader View
 and Pocket use. Returns `null` if the page can't be fetched or parsed.
 
+## What the scraped body is (and isn't) used for
+
+The extracted `content` is a **search-index input only**: it's stored on
+the row and fed into `articles_fts` so a query can match text that never
+appears in the title or the RSS `description`. `GET /articles/:id` does
+**not** return it - the app shows the RSS `description` snippet plus a
+"Read on <source>" link to the publisher's own page, rather than
+reproducing the full body. The scrape is kicked off fire-and-forget from
+that route (`backfillContentForSearch`) the first time an un-scraped
+article is opened, never awaited, so it adds no latency and a failure is
+just a logged line. `image_caption` and `read_time_minutes` ride along
+from the same scrape and *are* returned (a photo credit and a number,
+not article prose).
+
 ## Lazy-loaded images
 
 Many publishers lazy-load images: the `<img src>` is a tiny placeholder

@@ -123,29 +123,33 @@ router.get('/articles/top', (req, res) => {
   res.json(rankArticles(candidates, { limit, maxPerCategory: category ? undefined : MAX_PER_CATEGORY }));
 });
 
-router.get('/articles/:id', async (req, res) => {
+// Fire-and-forget: pull the readable body for an article we haven't
+// scraped yet, purely to enrich FTS search (articles_fts indexes it). The
+// scraped full text is never served to the app - the app shows the RSS
+// `description` snippet plus a link to the publisher (see
+// docs/article-scraper.md). Never awaited, so a slow or failing scrape
+// can't add latency to the request; a repeat call before the first
+// finishes is just a wasted fetch and an idempotent UPDATE.
+function backfillContentForSearch(id, link) {
+  scrapeArticle(link)
+    .then((scraped) => {
+      if (!scraped) return;
+      db.prepare(
+        'UPDATE articles SET content = ?, image_caption = ?, read_time_minutes = ? WHERE id = ?'
+      ).run(scraped.content, scraped.imageCaption, scraped.readTimeMinutes, id);
+      syncArticleFts(id);
+    })
+    .catch((err) => console.error(`Failed to scrape article ${id}:`, err.message));
+}
+
+router.get('/articles/:id', (req, res) => {
   const article = db.prepare('SELECT * FROM articles WHERE id = ?').get(req.params.id);
   if (!article) {
     res.status(404).json({ error: 'Article not found' });
     return;
   }
 
-  if (!article.content) {
-    try {
-      const scraped = await scrapeArticle(article.link);
-      if (scraped) {
-        db.prepare(
-          'UPDATE articles SET content = ?, image_caption = ?, read_time_minutes = ? WHERE id = ?'
-        ).run(scraped.content, scraped.imageCaption, scraped.readTimeMinutes, article.id);
-        syncArticleFts(article.id);
-        article.content = scraped.content;
-        article.image_caption = scraped.imageCaption;
-        article.read_time_minutes = scraped.readTimeMinutes;
-      }
-    } catch (err) {
-      console.error(`Failed to scrape article ${article.id}:`, err.message);
-    }
-  }
+  if (!article.content) backfillContentForSearch(article.id, article.link);
 
   const related = db
     .prepare(
@@ -154,7 +158,10 @@ router.get('/articles/:id', async (req, res) => {
     )
     .all(article.category, article.language, article.id);
 
-  res.json({ ...article, related });
+  // `content` (the scraped full body) is deliberately not in the response -
+  // the app renders `description` + a "Read on <source>" link instead.
+  const { content, ...rest } = article;
+  res.json({ ...rest, related });
 });
 
 router.get('/categories', (req, res) => {
