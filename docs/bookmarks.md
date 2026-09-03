@@ -25,6 +25,10 @@ the same call shape `read_events` / `POST /me/reads` already uses:
 - `POST /me/bookmarks` `{ articleId }` - looks the article up server-side
   (`404` if unknown), then `INSERT ... ON CONFLICT(user_id, article_id) DO
   NOTHING`. `204`.
+- `POST /me/bookmarks/bulk` `{ articleIds: number[] }` - the same insert
+  for a whole list in one transaction (deduped, non-integers and ids that
+  aren't real articles dropped silently, capped at 500). `204`. Used for
+  the sign-in replay below instead of N single POSTs.
 - `DELETE /me/bookmarks/:articleId` - `204` even if nothing matched.
 - `DELETE /me/bookmarks` - clears the whole list for the user in one call
   (the app's "Clear all" action). `204` even when there was nothing to
@@ -33,9 +37,9 @@ the same call shape `read_events` / `POST /me/reads` already uses:
 ## No server-side merge
 
 There is no "merge my guest list into my account" endpoint. On sign-in
-the app just replays its whole on-device list through `POST /me/bookmarks`
-one id at a time; the composite primary key means a re-save of something
-the account already had is a harmless no-op, and `DELETE` of something
-already gone is too. After the replay the app pulls `GET /me/bookmarks`
+the app just replays its whole on-device list through
+`POST /me/bookmarks/bulk` in one call; the composite primary key means a
+re-save of something the account already had is a harmless no-op, and
+`DELETE` of something already gone is too. After the replay the app pulls `GET /me/bookmarks`
 and adopts that as the device's list. The union happens on the client, and
 both endpoints being idempotent is what keeps that safe to do bluntly.

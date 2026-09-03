@@ -94,6 +94,55 @@ describe('POST /me/bookmarks', () => {
   });
 });
 
+describe('POST /me/bookmarks/bulk', () => {
+  test('requires authentication', async () => {
+    const res = await request(app).post('/me/bookmarks/bulk').send({ articleIds: [1] });
+    expect(res.status).toBe(401);
+  });
+
+  test('rejects a non-array body', async () => {
+    const token = signSessionToken(1);
+    const res = await request(app)
+      .post('/me/bookmarks/bulk')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ articleIds: 5 });
+    expect(res.status).toBe(400);
+  });
+
+  test('saves every real article id, dedupes, skips non-existent ones, and is idempotent', async () => {
+    insertArticle({ id: 1 });
+    insertArticle({ id: 2, link: 'https://example.com/2' });
+    const token = signSessionToken(1);
+
+    const res = await request(app)
+      .post('/me/bookmarks/bulk')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ articleIds: [1, 1, 2, 999, '3'] }); // dup, unknown, non-int
+    expect(res.status).toBe(204);
+
+    const again = await request(app)
+      .post('/me/bookmarks/bulk')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ articleIds: [1, 2] });
+    expect(again.status).toBe(204);
+
+    const ids = db
+      .prepare('SELECT article_id FROM bookmarks WHERE user_id = 1 ORDER BY article_id')
+      .all()
+      .map((r) => r.article_id);
+    expect(ids).toEqual([1, 2]);
+  });
+
+  test('204 with nothing to do on an empty list', async () => {
+    const token = signSessionToken(1);
+    const res = await request(app)
+      .post('/me/bookmarks/bulk')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ articleIds: [] });
+    expect(res.status).toBe(204);
+  });
+});
+
 describe('GET /me/bookmarks', () => {
   test('requires authentication', async () => {
     const res = await request(app).get('/me/bookmarks');

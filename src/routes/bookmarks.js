@@ -52,6 +52,41 @@ router.post('/me/bookmarks', requireAuth, (req, res) => {
   res.status(204).end();
 });
 
+// One call to replay a whole on-device guest list at sign-in, instead of
+// the app firing N parallel POST /me/bookmarks. Idempotent (ON CONFLICT
+// DO NOTHING), skips ids that aren't real articles, deduped, capped.
+const BULK_MAX = 500;
+const insertBookmarksBulk = db.transaction((userId, articleIds) => {
+  for (const id of articleIds) {
+    insertBookmarkStmt.run({ user_id: userId, article_id: id });
+  }
+});
+
+router.post('/me/bookmarks/bulk', requireAuth, (req, res) => {
+  if (!Array.isArray(req.body.articleIds)) {
+    res.status(400).json({ error: 'articleIds must be an array' });
+    return;
+  }
+  const ids = [...new Set(req.body.articleIds.map(Number).filter(Number.isInteger))];
+  if (ids.length === 0) {
+    res.status(204).end();
+    return;
+  }
+  if (ids.length > BULK_MAX) {
+    res.status(400).json({ error: `too many articleIds (max ${BULK_MAX})` });
+    return;
+  }
+
+  const placeholders = ids.map(() => '?').join(',');
+  const existing = db
+    .prepare(`SELECT id FROM articles WHERE id IN (${placeholders})`)
+    .all(...ids)
+    .map((r) => r.id);
+
+  insertBookmarksBulk(req.userId, existing);
+  res.status(204).end();
+});
+
 // Clear the whole list in one call - the app's "Clear all" action. 204
 // even when there was nothing to clear.
 router.delete('/me/bookmarks', requireAuth, (req, res) => {
