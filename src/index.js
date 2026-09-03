@@ -5,6 +5,8 @@ const cron = require('node-cron');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const pinoHttp = require('pino-http');
+const logger = require('./logger');
 const db = require('./db');
 const fetchAllFeeds = require('./ingestion/fetcher');
 const { discoverAllSources } = require('./ingestion/discovery');
@@ -26,6 +28,12 @@ const app = express();
 app.set('trust proxy', 1); // behind a PaaS load balancer - needed for correct client IPs / rate limiting.
 app.disable('x-powered-by');
 app.use(helmet());
+
+// One structured log line per request. Skips /healthz so a monitor
+// pinging every few seconds doesn't bury everything else.
+app.use(
+  pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/healthz' } })
+);
 
 // CORS_ORIGIN is a comma-separated allowlist; unset means "reflect any
 // origin" (fine for the native app, which isn't subject to CORS anyway -
@@ -73,7 +81,7 @@ async function refreshSourcesAndFetch() {
   const discovered = await discoverAllSources();
   setSources(discovered);
   const publisherCount = new Set(discovered.map((s) => s.name)).size;
-  console.log(`Discovered ${discovered.length} feeds across ${publisherCount} publishers`);
+  logger.info({ feeds: discovered.length, publishers: publisherCount }, 'discovered feeds');
   await fetchAllFeeds();
   await clusterNewArticles();
 }
@@ -120,24 +128,22 @@ if (require.main === module) {
   // don't grow forever - see services/retention-config.js.
   cron.schedule(RETENTION_CRON, () => {
     const { readEvents, clusterDecisions } = pruneRetention();
-    console.log(
-      `Retention: pruned ${readEvents} read_events, ${clusterDecisions} cluster_decisions`
-    );
+    logger.info({ readEvents, clusterDecisions }, 'retention prune');
   });
 
   const PORT = process.env.PORT || 3000;
-  const server = app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
+  const server = app.listen(PORT, '0.0.0.0', () => logger.info({ port: PORT }, 'server listening'));
 
   // Close the listener and the DB handle on a host stop signal instead of
   // being killed mid-write; force-exit if it hasn't happened in 10s.
   const shutdown = (signal) => {
-    console.log(`${signal} received - shutting down`);
+    logger.info({ signal }, 'shutting down');
     server.close(() => {
       db.close();
       process.exit(0);
     });
     setTimeout(() => {
-      console.error('Shutdown timed out - forcing exit');
+      logger.error('shutdown timed out - forcing exit');
       process.exit(1);
     }, 10000).unref();
   };

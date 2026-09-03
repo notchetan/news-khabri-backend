@@ -4,6 +4,7 @@ const db = require('../db');
 const { verifyGoogleIdToken, signSessionToken } = require('../services/auth');
 const requireAuth = require('../middleware/require-auth');
 const validate = require('../middleware/validate');
+const logger = require('../logger');
 
 const router = express.Router();
 
@@ -58,7 +59,7 @@ router.post('/auth/google', validate({ body: googleAuthBody }), async (req, res)
   } catch (err) {
     // Log the real reason server-side; don't hand Google-library internals
     // back to the caller.
-    console.warn('Google ID token verification failed:', err.message);
+    logger.warn({ err: err.message }, 'google id token verification failed');
     res.status(401).json({ error: 'Invalid Google ID token' });
     return;
   }

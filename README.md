@@ -59,6 +59,7 @@ are optional.
 | `DB_PATH` | `articles.db` | SQLite database file path. Point at a mounted volume on a container host. |
 | `CORS_ORIGIN` | — | Comma-separated allowed origins. Unset reflects any origin. |
 | `ENABLE_RANKING_DEBUG` | — | Set to `true` to allow `?debug=true` on `/stories/top`. Never set in production. |
+| `LOG_LEVEL` | `info` | pino level (`silent` under `NODE_ENV=test`). Pretty-printed in dev, JSON in prod. |
 
 ## API
 
