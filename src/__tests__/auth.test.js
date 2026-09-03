@@ -143,7 +143,7 @@ describe('PUT /me/preferences', () => {
     expect(getRes.body.preferences).toEqual(preferences);
   });
 
-  test('a second PUT replaces the whole preference set rather than merging', async () => {
+  test('a full-bundle PUT sets every field (whole-object clients unchanged)', async () => {
     const token = await signIn();
     await request(app)
       .put('/me/preferences')
@@ -157,6 +157,45 @@ describe('PUT /me/preferences', () => {
 
     const res = await request(app).get('/me').set('Authorization', `Bearer ${token}`);
     expect(res.body.preferences).toMatchObject({ theme: 'day', fontSize: 'medium', language: 'en', debugEnabled: false });
+  });
+
+  test('a partial PUT only touches the fields it sends; others keep their stored value', async () => {
+    const token = await signIn();
+    await request(app)
+      .put('/me/preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ theme: 'night', fontSize: 'large', language: 'hi', debugEnabled: true, sources: { en: ['NDTV'] }, notificationInterval: 15 });
+
+    // Only theme changes here.
+    await request(app)
+      .put('/me/preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ theme: 'day' });
+
+    const res = await request(app).get('/me').set('Authorization', `Bearer ${token}`);
+    expect(res.body.preferences).toEqual({
+      theme: 'day',
+      fontSize: 'large',
+      language: 'hi',
+      debugEnabled: true,
+      sources: { en: ['NDTV'] },
+      notificationInterval: 15,
+    });
+  });
+
+  test('two partial PUTs of different fields both land (no clobber)', async () => {
+    const token = await signIn();
+    await request(app)
+      .put('/me/preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ theme: 'night', fontSize: 'medium', language: 'en', debugEnabled: false, sources: {}, notificationInterval: 0 });
+
+    // Simulates two devices: one changes theme, the other font size.
+    await request(app).put('/me/preferences').set('Authorization', `Bearer ${token}`).send({ theme: 'day' });
+    await request(app).put('/me/preferences').set('Authorization', `Bearer ${token}`).send({ fontSize: 'large' });
+
+    const res = await request(app).get('/me').set('Authorization', `Bearer ${token}`);
+    expect(res.body.preferences).toMatchObject({ theme: 'day', fontSize: 'large' });
   });
 
   test('rejects an unauthenticated request', async () => {

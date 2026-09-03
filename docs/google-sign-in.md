@@ -31,10 +31,17 @@ happened on.
 [...] }` per-language shape the frontend's own `sourcesPreference`
 AsyncStorage key already uses (see the frontend's
 `contexts/sources-preference.tsx`), rather than a normalized per-language
-table. `PUT /me/preferences` is a whole-object replace of one row, not a
-partial patch - the app always sends its full current preference set, so
-there's no server-side merge logic to keep in sync with the client's own
-five independent preference contexts.
+table.
+
+`PUT /me/preferences` is a **partial patch**: it merges the fields present
+in the request body over the stored row and leaves absent fields
+untouched. The app sends only the field(s) a device actually changed
+(`auth-context.tsx`'s `diffPreferenceBundle` against a last-synced
+baseline), so two signed-in devices editing *different* preferences no
+longer clobber each other. A client that sends the whole bundle (a new
+account's first sync) still works - every field is present, so the merge
+is a full replace. There are no per-field timestamps yet, so two devices
+racing on the *same* field is still last-writer-wins for that one field.
 
 ## `DELETE /me` clears every table explicitly
 

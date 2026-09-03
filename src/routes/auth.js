@@ -89,20 +89,37 @@ const upsertPreferences = db.prepare(`
     updated_at = CURRENT_TIMESTAMP
 `);
 
-// Whole-object replace, not a partial patch - the app always sends its
-// full current preference set (see docs/google-sign-in.md), so there's no
-// need for per-field optionality/merging here.
+// Partial patch: only the fields actually present in the body are
+// written; anything absent keeps its stored value. The app sends just the
+// field(s) a device changed, so two devices editing *different*
+// preferences no longer clobber each other (see docs/google-sign-in.md).
+// A client that still sends the whole bundle behaves exactly as before.
+const PREF_FIELDS = ['theme', 'fontSize', 'language', 'debugEnabled', 'sources', 'notificationInterval'];
+
 router.put('/me/preferences', requireAuth, (req, res) => {
-  const { theme, fontSize, language, debugEnabled, sources, notificationInterval } = req.body;
+  const body = req.body || {};
+  const current = toPreferencesResponse(getPreferences.get(req.userId)) || {
+    theme: null,
+    fontSize: null,
+    language: null,
+    debugEnabled: false,
+    sources: {},
+    notificationInterval: 0,
+  };
+
+  const merged = {};
+  for (const field of PREF_FIELDS) {
+    merged[field] = field in body ? body[field] : current[field];
+  }
 
   upsertPreferences.run({
     userId: req.userId,
-    theme: theme ?? null,
-    fontSize: fontSize ?? null,
-    language: language ?? null,
-    debugEnabled: debugEnabled ? 1 : 0,
-    sourcesJson: JSON.stringify(sources ?? {}),
-    notificationInterval: notificationInterval ?? 0,
+    theme: merged.theme ?? null,
+    fontSize: merged.fontSize ?? null,
+    language: merged.language ?? null,
+    debugEnabled: merged.debugEnabled ? 1 : 0,
+    sourcesJson: JSON.stringify(merged.sources ?? {}),
+    notificationInterval: merged.notificationInterval ?? 0,
   });
 
   res.json({ preferences: toPreferencesResponse(getPreferences.get(req.userId)) });
