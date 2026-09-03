@@ -1,5 +1,7 @@
 const express = require('express');
+const { z } = require('zod');
 const db = require('../db');
+const validate = require('../middleware/validate');
 const { syncArticleFts, buildFtsQuery } = require('../db/fts');
 const { rankArticles, computeRankingScore } = require('../services/ranking');
 const {
@@ -14,6 +16,10 @@ const { HIDDEN_CATEGORIES } = require('../services/category-aliases');
 const router = express.Router();
 
 const PAGE_SIZE = 20;
+// The list/feed query params are parsed leniently below (missing -> default,
+// junk -> falls back) rather than rejected, so the feed never 400s a paying
+// reader over a stray param; only the numeric :id path segment is strict.
+const numericIdParam = z.object({ id: z.string().regex(/^\d+$/) });
 
 // Comma-separated query param -> a clean array (drops empty entries from a
 // stray leading/trailing/doubled comma) - shared shape for both the
@@ -142,7 +148,7 @@ function backfillContentForSearch(id, link) {
     .catch((err) => console.error(`Failed to scrape article ${id}:`, err.message));
 }
 
-router.get('/articles/:id', (req, res) => {
+router.get('/articles/:id', validate({ params: numericIdParam }), (req, res) => {
   const article = db.prepare('SELECT * FROM articles WHERE id = ?').get(req.params.id);
   if (!article) {
     res.status(404).json({ error: 'Article not found' });

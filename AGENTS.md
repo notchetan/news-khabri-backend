@@ -136,6 +136,21 @@ opt back in itself. `GET /healthz` (`{ status, uptime }`, no auth) is
 registered *before* the global limiter so a monitor pinging it can't be
 throttled.
 
+## Request validation: `middleware/validate.js` + colocated zod schemas
+
+Every route that reads a request **body** or a numeric **`:id` path
+param** runs it through `validate({ body, params })` (a small wrapper over
+`schema.safeParse`) before the handler. On failure it's a uniform
+`400 { error: 'Invalid request', details: [{ path, message }] }`. `body`
+is *replaced* with the parsed value (coerced, unknown keys stripped), so
+handlers read `req.body.articleId` as a number directly; `params` is only
+checked, not reassigned, so handlers keep their own `Number(...)`. Schemas
+live at the top of each route file, not a central folder. **The list/feed
+*query* params (`language`, `category`, `limit`, `sources`, `cursor`,
+`search`) are deliberately still parsed leniently in the handler** -
+missing falls back to a default, junk is clamped - so the feed never 400s
+a reader over a stray query string.
+
 ## Graceful degradation over throwing, for optional signals
 
 `services/embeddings.js`'s `getEmbedding` never throws — a failed model

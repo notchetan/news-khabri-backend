@@ -1,8 +1,12 @@
 const express = require('express');
+const { z } = require('zod');
 const db = require('../db');
 const requireAuth = require('../middleware/require-auth');
+const validate = require('../middleware/validate');
 
 const router = express.Router();
+
+const articleIdBody = z.object({ articleId: z.coerce.number().int().positive() });
 
 const getArticleStmt = db.prepare('SELECT id, story_id, category, source FROM articles WHERE id = ?');
 const getStoryEntitiesStmt = db.prepare('SELECT entities_json FROM stories WHERE id = ?');
@@ -16,14 +20,8 @@ const insertReadEventStmt = db.prepare(`
 // server-side and denormalizes its category/source/story-entities onto the
 // read_events row (see docs/personalization.md) rather than trusting
 // whatever the client might send for those fields.
-router.post('/me/reads', requireAuth, (req, res) => {
-  const articleId = Number(req.body.articleId);
-  if (!Number.isInteger(articleId)) {
-    res.status(400).json({ error: 'articleId is required' });
-    return;
-  }
-
-  const article = getArticleStmt.get(articleId);
+router.post('/me/reads', requireAuth, validate({ body: articleIdBody }), (req, res) => {
+  const article = getArticleStmt.get(req.body.articleId);
   if (!article) {
     res.status(404).json({ error: 'Article not found' });
     return;

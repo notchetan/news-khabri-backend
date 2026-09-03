@@ -1,8 +1,15 @@
 const express = require('express');
+const { z } = require('zod');
 const db = require('../db');
 const requireAuth = require('../middleware/require-auth');
+const validate = require('../middleware/validate');
 
 const router = express.Router();
+
+const articleId = z.coerce.number().int().positive();
+const articleIdBody = z.object({ articleId });
+const bulkBody = z.object({ articleIds: z.array(articleId).max(500, 'at most 500 articleIds') });
+const articleIdParam = z.object({ articleId: z.string().regex(/^\d+$/) });
 
 const getArticleStmt = db.prepare('SELECT id FROM articles WHERE id = ?');
 const insertBookmarkStmt = db.prepare(`
@@ -36,44 +43,30 @@ router.get('/me/bookmarks', requireAuth, (req, res) => {
   res.json(listBookmarksStmt.all(req.userId));
 });
 
-router.post('/me/bookmarks', requireAuth, (req, res) => {
-  const articleId = Number(req.body.articleId);
-  if (!Number.isInteger(articleId)) {
-    res.status(400).json({ error: 'articleId is required' });
-    return;
-  }
-
-  if (!getArticleStmt.get(articleId)) {
+router.post('/me/bookmarks', requireAuth, validate({ body: articleIdBody }), (req, res) => {
+  if (!getArticleStmt.get(req.body.articleId)) {
     res.status(404).json({ error: 'Article not found' });
     return;
   }
 
-  insertBookmarkStmt.run({ user_id: req.userId, article_id: articleId });
+  insertBookmarkStmt.run({ user_id: req.userId, article_id: req.body.articleId });
   res.status(204).end();
 });
 
 // One call to replay a whole on-device guest list at sign-in, instead of
 // the app firing N parallel POST /me/bookmarks. Idempotent (ON CONFLICT
-// DO NOTHING), skips ids that aren't real articles, deduped, capped.
-const BULK_MAX = 500;
+// DO NOTHING), deduped, skips ids that aren't real articles (cap enforced
+// by the zod schema).
 const insertBookmarksBulk = db.transaction((userId, articleIds) => {
   for (const id of articleIds) {
     insertBookmarkStmt.run({ user_id: userId, article_id: id });
   }
 });
 
-router.post('/me/bookmarks/bulk', requireAuth, (req, res) => {
-  if (!Array.isArray(req.body.articleIds)) {
-    res.status(400).json({ error: 'articleIds must be an array' });
-    return;
-  }
-  const ids = [...new Set(req.body.articleIds.map(Number).filter(Number.isInteger))];
+router.post('/me/bookmarks/bulk', requireAuth, validate({ body: bulkBody }), (req, res) => {
+  const ids = [...new Set(req.body.articleIds)];
   if (ids.length === 0) {
     res.status(204).end();
-    return;
-  }
-  if (ids.length > BULK_MAX) {
-    res.status(400).json({ error: `too many articleIds (max ${BULK_MAX})` });
     return;
   }
 
@@ -97,15 +90,14 @@ router.delete('/me/bookmarks', requireAuth, (req, res) => {
 // Idempotent - removing a bookmark that isn't there is still a 204, so the
 // app never has to care whether its optimistic local state was already
 // ahead of the server.
-router.delete('/me/bookmarks/:articleId', requireAuth, (req, res) => {
-  const articleId = Number(req.params.articleId);
-  if (!Number.isInteger(articleId)) {
-    res.status(400).json({ error: 'articleId must be an integer' });
-    return;
+router.delete(
+  '/me/bookmarks/:articleId',
+  requireAuth,
+  validate({ params: articleIdParam }),
+  (req, res) => {
+    deleteBookmarkStmt.run(req.userId, Number(req.params.articleId));
+    res.status(204).end();
   }
-
-  deleteBookmarkStmt.run(req.userId, articleId);
-  res.status(204).end();
-});
+);
 
 module.exports = router;
