@@ -1,4 +1,5 @@
 const Parser = require('rss-parser');
+const logger = require('../logger');
 const parser = new Parser({
   customFields: {
     item: [
@@ -120,9 +121,9 @@ async function fetchAllFeeds(sourceNameFilter) {
         const { id } = findIdByLink.get(link);
         syncArticleFts(id);
       }
-      console.log(`Fetched ${feed.items.length} from ${src.name}`);
+      logger.info({ source: src.name, count: feed.items.length }, "fetched feed");
     } catch (err) {
-      console.error(`Failed to fetch ${src.name}:`, err.message);
+      logger.error({ source: src.name, err: err.message }, "feed fetch failed");
     }
   }
 }

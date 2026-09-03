@@ -4,6 +4,7 @@ const { rankStories } = require('./story-ranking');
 const { STORY_FEED_POOL_SIZE } = require('./clustering-config');
 const { loadMembersByStoryId } = require('../routes/stories');
 const { trendingTitle } = require('./notification-strings');
+const logger = require('../logger');
 
 const expo = new Expo();
 
@@ -79,7 +80,7 @@ async function sendTrendingNotifications(now = new Date()) {
     try {
       tickets = await expo.sendPushNotificationsAsync(chunk);
     } catch (err) {
-      console.error('Failed to send a push notification chunk:', err.message);
+      logger.error({ err: err.message }, 'push notification chunk send failed');
       continue;
     }
     // Tickets come back in the same order as the chunk sent - see

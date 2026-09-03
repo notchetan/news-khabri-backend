@@ -1,5 +1,6 @@
 const https = require('https');
 const { normalizeCategory } = require('../services/category-aliases');
+const logger = require('../logger');
 
 // Meta/utility feeds that aren't topical categories - alternate sort orders
 // or whole-site aggregates duplicating a publisher's own flagship feed.
@@ -281,7 +282,7 @@ async function discoverAllSources() {
       discovered.push(...r.value);
     } else {
       const label = i < scrapers.length ? allScrapers[i].name : REGIONAL_LANGUAGE_PROPERTIES[i - scrapers.length].publisher;
-      console.error(`Discovery failed for ${label}:`, r.reason.message);
+      logger.error({ label, err: r.reason.message }, "discovery failed for source");
     }
   });
 

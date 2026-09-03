@@ -136,6 +136,16 @@ opt back in itself. `GET /healthz` (`{ status, uptime }`, no auth) is
 registered *before* the global limiter so a monitor pinging it can't be
 throttled.
 
+## Logging: `src/logger.js` (pino), not `console.*`
+
+There is one shared `logger` (a pino instance). `console.log`/`error`/`warn`
+were all replaced by `logger.info({ ...fields }, 'lower-case message')`;
+use the same shape for anything new. `pino-http` logs one line per
+request in `index.js` (skipping `/healthz`). Under `NODE_ENV=test` the
+level is `silent`, so the suite is quiet and there's no transport worker
+to leak past Jest; `LOG_LEVEL` overrides. Dev output is `pino-pretty`
+(a devDependency), production is JSON.
+
 ## Request validation: `middleware/validate.js` + colocated zod schemas
 
 Every route that reads a request **body** or a numeric **`:id` path

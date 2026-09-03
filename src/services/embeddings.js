@@ -1,5 +1,6 @@
 // Stage 3 semantic similarity - see docs/embeddings.md.
 const { pipeline } = require('@huggingface/transformers');
+const logger = require('../logger');
 
 const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2';
 const EMBEDDING_DIMENSIONS = 384;
@@ -21,7 +22,7 @@ async function getEmbedding(text) {
     const output = await extractor(text, { pooling: 'mean', normalize: true });
     return Float32Array.from(output.data);
   } catch (err) {
-    console.error('Failed to compute embedding:', err.message);
+    logger.error({ err: err.message }, 'embedding computation failed');
     return null;
   }
 }

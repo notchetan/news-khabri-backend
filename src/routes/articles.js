@@ -3,6 +3,7 @@ const { z } = require('zod');
 const db = require('../db');
 const validate = require('../middleware/validate');
 const { syncArticleFts, buildFtsQuery } = require('../db/fts');
+const logger = require('../logger');
 const { rankArticles, computeRankingScore } = require('../services/ranking');
 const {
   CANDIDATE_POOL_SIZE,
@@ -145,7 +146,7 @@ function backfillContentForSearch(id, link) {
       ).run(scraped.content, scraped.imageCaption, scraped.readTimeMinutes, id);
       syncArticleFts(id);
     })
-    .catch((err) => console.error(`Failed to scrape article ${id}:`, err.message));
+    .catch((err) => logger.error({ articleId: id, err: err.message }, "article scrape failed"));
 }
 
 router.get('/articles/:id', validate({ params: numericIdParam }), (req, res) => {
