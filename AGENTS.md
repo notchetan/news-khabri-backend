@@ -93,7 +93,11 @@ against real ingested data; it's never read by any API route. If you're
 investigating "why did/didn't these two articles cluster", query this
 table for the article's `id` before trying to reason about it from the
 config alone. `clustering-config.js`'s `LOG_CLUSTER_DECISIONS` flag can
-disable this if the table grows too large in practice.
+disable this entirely; the daily retention cron (`services/retention.js`,
+`services/retention-config.js`) also prunes rows older than
+`CLUSTER_DECISIONS_RETENTION_DAYS` (30) - and `read_events` older than
+`READ_EVENTS_RETENTION_DAYS` (90) - so neither append-only table grows
+without bound.
 
 ## Schema migrations: a guarded `ALTER TABLE`, not a migration framework
 

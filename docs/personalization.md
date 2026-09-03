@@ -25,6 +25,13 @@ If the article isn't clustered into a story yet (`story_id` is null),
 `entities_json` on the read event is null too - contributes nothing to the
 entity-overlap sub-signal below, but category/source affinity still apply.
 
+`read_events` is append-only and never pruned by the write path. A daily
+retention cron (`services/retention.js` / `retention-config.js`, scheduled
+in `index.js`) deletes rows older than `READ_EVENTS_RETENTION_DAYS` (90) -
+comfortably wider than the `READ_HISTORY_DAYS` (30) window
+`personalization.js` actually reads, so pruning can never remove a row
+that scoring would still have used.
+
 ## Using it: `services/personalization.js`
 
 `loadReadProfile(userId)` builds a lightweight profile from a user's recent

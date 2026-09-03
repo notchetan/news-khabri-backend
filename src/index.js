@@ -13,6 +13,8 @@ const { clusterNewArticles } = require('./ingestion/clusterer');
 const { recomputeSourceTiers, getAllSourceTiers } = require('./ingestion/tier-tracker');
 const { TIER_CRON, TIER_RECOMPUTE_CRON, DEFAULT_TIER } = require('./services/tier-config');
 const { sendTrendingNotifications } = require('./services/push-notifications');
+const { pruneRetention } = require('./services/retention');
+const { RETENTION_CRON } = require('./services/retention-config');
 const articlesRouter = require('./routes/articles');
 const storiesRouter = require('./routes/stories');
 const pushRouter = require('./routes/push');
@@ -113,6 +115,15 @@ if (require.main === module) {
   // actually notifies whichever devices are due (see push-notifications.js's
   // isDue), so this doesn't over-notify anyone on a longer interval.
   cron.schedule('*/5 * * * *', () => sendTrendingNotifications());
+
+  // Trim the two append-only tables to their rolling windows so they
+  // don't grow forever - see services/retention-config.js.
+  cron.schedule(RETENTION_CRON, () => {
+    const { readEvents, clusterDecisions } = pruneRetention();
+    console.log(
+      `Retention: pruned ${readEvents} read_events, ${clusterDecisions} cluster_decisions`
+    );
+  });
 
   const PORT = process.env.PORT || 3000;
   const server = app.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
