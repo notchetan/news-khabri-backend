@@ -211,6 +211,19 @@ describe('sendTrendingNotifications', () => {
     expect(row.last_notified_at).toBe(now.toISOString());
   });
 
+  test('localises the notification title to the subscription language', async () => {
+    activeStory('en');
+    activeStory('hi');
+    insertSubscription({ push_token: 'ExponentPushToken[en]', language: 'en' });
+    insertSubscription({ push_token: 'ExponentPushToken[hi]', language: 'hi' });
+
+    await sendTrendingNotifications();
+
+    const [sent] = sendPushNotificationsAsync.mock.calls[0];
+    expect(sent.find((m) => m.to === 'ExponentPushToken[en]').title).toBe('Trending now');
+    expect(sent.find((m) => m.to === 'ExponentPushToken[hi]').title).toBe('अभी ट्रेंडिंग');
+  });
+
   test('sends each language its own trending story, computed once per language not once per device', async () => {
     const enStoryId = activeStory('en');
     const hiStoryId = activeStory('hi');
