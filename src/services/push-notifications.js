@@ -3,6 +3,7 @@ const db = require('../db');
 const { rankStories } = require('./story-ranking');
 const { STORY_FEED_POOL_SIZE } = require('./clustering-config');
 const { loadMembersByStoryId } = require('../routes/stories');
+const { trendingTitle } = require('./notification-strings');
 
 const expo = new Expo();
 
@@ -65,7 +66,7 @@ async function sendTrendingNotifications(now = new Date()) {
     subscriptionByToken.set(subscription.push_token, subscription);
     messages.push({
       to: subscription.push_token,
-      title: 'Trending now',
+      title: trendingTitle(subscription.language),
       body: story.title,
       data: { storyId: story.id },
     });
