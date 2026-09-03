@@ -29,10 +29,14 @@ function mockGoogleIdentity(overrides = {}) {
 }
 
 beforeEach(() => {
-  // user_preferences.user_id references users(id) - delete the referencing
-  // table first or a leftover preferences row blocks deleting its user.
+  // Clear every table that references users(id) before users itself
+  // (better-sqlite3 enforces foreign keys), and articles last since
+  // read_events/bookmarks point at it too.
+  db.exec('DELETE FROM read_events');
+  db.exec('DELETE FROM bookmarks');
   db.exec('DELETE FROM user_preferences');
   db.exec('DELETE FROM users');
+  db.exec('DELETE FROM articles');
   jest.clearAllMocks();
 });
 
@@ -158,5 +162,65 @@ describe('PUT /me/preferences', () => {
   test('rejects an unauthenticated request', async () => {
     const res = await request(app).put('/me/preferences').send({ theme: 'night' });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('DELETE /me', () => {
+  async function signIn() {
+    mockGoogleIdentity();
+    const res = await request(app).post('/auth/google').send({ idToken: 'valid-token' });
+    return { token: res.body.token, userId: res.body.user.id };
+  }
+
+  test('rejects an unauthenticated request', async () => {
+    const res = await request(app).delete('/me');
+    expect(res.status).toBe(401);
+  });
+
+  test('removes the user and everything referencing it', async () => {
+    const { token, userId } = await signIn();
+
+    await request(app)
+      .put('/me/preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ theme: 'night', fontSize: 'large', language: 'hi', debugEnabled: false, sources: {}, notificationInterval: 0 });
+    // bookmarks.article_id / read_events.article_id are real FKs
+    // (better-sqlite3 enforces foreign keys by default) - needs an article.
+    db.prepare('INSERT INTO articles (id, title, link, source) VALUES (1, ?, ?, ?)').run(
+      'Headline',
+      'https://example.com/1',
+      'NDTV'
+    );
+    db.prepare('INSERT INTO bookmarks (user_id, article_id) VALUES (?, ?)').run(userId, 1);
+    db.prepare(
+      'INSERT INTO read_events (user_id, article_id, story_id, category, source, entities_json) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(userId, 1, null, 'national', 'NDTV', null);
+
+    const res = await request(app).delete('/me').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(204);
+
+    expect(db.prepare('SELECT 1 FROM users WHERE id = ?').get(userId)).toBeUndefined();
+    expect(db.prepare('SELECT 1 FROM user_preferences WHERE user_id = ?').get(userId)).toBeUndefined();
+    expect(db.prepare('SELECT COUNT(*) AS n FROM bookmarks WHERE user_id = ?').get(userId).n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM read_events WHERE user_id = ?').get(userId).n).toBe(0);
+  });
+
+  test('the old session token no longer resolves to an account afterwards', async () => {
+    const { token } = await signIn();
+    await request(app).delete('/me').set('Authorization', `Bearer ${token}`);
+
+    const res = await request(app).get('/me').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  test('signing in again after deletion creates a fresh account', async () => {
+    const first = await signIn();
+    await request(app).delete('/me').set('Authorization', `Bearer ${first.token}`);
+
+    const second = await signIn();
+    expect(second.userId).not.toBe(first.userId);
+    const me = await request(app).get('/me').set('Authorization', `Bearer ${second.token}`);
+    expect(me.status).toBe(200);
+    expect(me.body.preferences).toBeNull();
   });
 });
