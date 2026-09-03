@@ -125,9 +125,15 @@ router.get('/stories/top', (req, res) => {
     params.push(...sourceList);
   }
 
+  // Pool by updated_at, not id: `updated_at` is bumped every time a story
+  // gains a member (see ingestion/clusterer.js), so an older story that's
+  // still attracting fresh coverage stays in the candidate pool instead of
+  // aging out behind newer-but-quiet stories. rankStories re-orders what
+  // survives. (updated_at is SQLite's own timestamp format - sortable as a
+  // string, unlike the raw-RSS `latest_published_at`.)
   const candidateStories = db
     .prepare(
-      `SELECT * FROM stories WHERE ${conditions.join(' AND ')} ORDER BY id DESC LIMIT ?`
+      `SELECT * FROM stories WHERE ${conditions.join(' AND ')} ORDER BY updated_at DESC, id DESC LIMIT ?`
     )
     .all(...params, STORY_FEED_POOL_SIZE);
 
