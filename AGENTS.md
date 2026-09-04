@@ -110,6 +110,15 @@ don't reach for a migration library, and don't assume a fresh
 `CREATE TABLE` will pick up a new column on an existing `articles.db` —
 it won't, the guarded `ALTER TABLE` is what does.
 
+One thing `ALTER TABLE` genuinely *can't* do in SQLite is drop a `NOT
+NULL` (or change a column's constraints). The `users` table needed exactly
+that when Apple sign-in landed — `google_id` went from `UNIQUE NOT NULL`
+to nullable — so `db/index.js` does the standard SQLite table rebuild
+(`foreign_keys OFF`, create-new / copy / drop / rename in a transaction,
+`foreign_keys ON`), still guarded (on the old constraint being present) so
+it runs at most once and never on a fresh DB. See `docs/apple-sign-in.md`.
+Reach for this only when `ALTER` truly can't express the change.
+
 The connection opens in `journal_mode = WAL` / `synchronous = NORMAL` (a
 no-op for the `:memory:` test DB) — so a real deployment's `articles.db`
 grows `-wal` / `-shm` sidecar files; back up / copy all three together,
@@ -135,7 +144,8 @@ and `db.close()`s before exit, with a 10s force-exit fallback.
 a `cors()` whose origin comes from `CORS_ORIGIN` (comma-separated; unset =
 reflect any origin), `express.json({ limit: '16kb' })`, and two
 `express-rate-limit` instances — a 600/15min global limiter and a 30/15min
-limiter on `POST /auth/google` specifically. **Both limiters `skip` when
+limiter on the sign-in routes (`POST /auth/google` and `POST /auth/apple` —
+see `docs/apple-sign-in.md`). **Both limiters `skip` when
 `NODE_ENV === 'test'`** so the suite's many sequential requests from one
 address don't trip them; a test that needs to exercise limiting has to
 opt back in itself. `GET /healthz` (`{ status, uptime }`, no auth) is

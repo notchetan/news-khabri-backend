@@ -63,12 +63,13 @@ const limiterBase = {
   skip: () => rateLimitingDisabled,
 };
 const globalLimiter = rateLimit({ ...limiterBase, limit: 600 });
-// Stricter: /auth/google verifies a Google token and can create an
-// account, and Google's verification endpoint has its own quota.
+// Stricter: the sign-in routes verify a third-party token and can create
+// an account, and the providers' verification endpoints have their own
+// quotas.
 const authLimiter = rateLimit({ ...limiterBase, limit: 30 });
 
 app.use(globalLimiter);
-app.use('/auth/google', authLimiter);
+app.use(['/auth/google', '/auth/apple'], authLimiter);
 
 app.use(articlesRouter);
 app.use(storiesRouter);

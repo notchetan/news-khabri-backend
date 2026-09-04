@@ -1,5 +1,6 @@
 const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
+const { createRemoteJWKSet, jwtVerify } = require('jose');
 const db = require('../db');
 
 // See docs/google-sign-in.md for where this comes from (Google Cloud
@@ -37,6 +38,27 @@ async function verifyGoogleIdToken(idToken) {
     email: payload.email,
     name: payload.name || null,
     avatarUrl: payload.picture || null,
+  };
+}
+
+// Sign in with Apple - see docs/apple-sign-in.md. The identity token is a
+// JWT signed by Apple with RS256; the public keys are Apple's own rotating
+// JWKS. `aud` is the app's bundle id for a native iOS sign-in (a Services
+// id would be used for web). Unlike Google's, Apple's token never carries
+// a name - the client sends that separately, and only on the very first
+// authorization. jose caches and refreshes the JWKS on its own.
+const APPLE_ISSUER = 'https://appleid.apple.com';
+const APPLE_CLIENT_ID = process.env.APPLE_CLIENT_ID || 'com.newskhabri.app';
+const appleJwks = createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys'));
+
+async function verifyAppleIdentityToken(identityToken) {
+  const { payload } = await jwtVerify(identityToken, appleJwks, {
+    issuer: APPLE_ISSUER,
+    audience: APPLE_CLIENT_ID,
+  });
+  return {
+    appleId: payload.sub,
+    email: typeof payload.email === 'string' ? payload.email : null,
   };
 }
 
@@ -78,6 +100,7 @@ function verifySessionToken(token) {
 
 module.exports = {
   verifyGoogleIdToken,
+  verifyAppleIdentityToken,
   signSessionToken,
   verifySessionToken,
   revokeSessions,

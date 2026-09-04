@@ -1,7 +1,12 @@
 const express = require('express');
 const { z } = require('zod');
 const db = require('../db');
-const { verifyGoogleIdToken, signSessionToken, revokeSessions } = require('../services/auth');
+const {
+  verifyGoogleIdToken,
+  verifyAppleIdentityToken,
+  signSessionToken,
+  revokeSessions,
+} = require('../services/auth');
 const requireAuth = require('../middleware/require-auth');
 const validate = require('../middleware/validate');
 const logger = require('../logger');
@@ -9,6 +14,18 @@ const logger = require('../logger');
 const router = express.Router();
 
 const googleAuthBody = z.object({ idToken: z.string().min(1) });
+// Apple only sends the user's name on the very first authorization, and
+// only client-side (never in the token) - so it's an optional body field
+// the app forwards through on that first sign-in.
+const appleAuthBody = z.object({
+  identityToken: z.string().min(1),
+  fullName: z
+    .object({
+      givenName: z.string().nullish(),
+      familyName: z.string().nullish(),
+    })
+    .nullish(),
+});
 const preferencesBody = z.object({
   theme: z.string().optional(),
   fontSize: z.string().optional(),
@@ -27,6 +44,19 @@ const upsertUser = db.prepare(`
     avatar_url = excluded.avatar_url
 `);
 const getUserByGoogleId = db.prepare('SELECT * FROM users WHERE google_id = ?');
+
+// Apple has no avatar and only gives a name on first sign-in, so this
+// upsert never overwrites name/email with nulls on a return visit - it
+// only fills a field that's currently empty (COALESCE keeps the stored
+// value when the incoming one is null).
+const upsertAppleUser = db.prepare(`
+  INSERT INTO users (apple_id, email, name)
+  VALUES (@appleId, @email, @name)
+  ON CONFLICT(apple_id) DO UPDATE SET
+    email = COALESCE(excluded.email, users.email),
+    name = COALESCE(users.name, excluded.name)
+`);
+const getUserByAppleId = db.prepare('SELECT * FROM users WHERE apple_id = ?');
 const getUserById = db.prepare('SELECT * FROM users WHERE id = ?');
 const getPreferences = db.prepare('SELECT * FROM user_preferences WHERE user_id = ?');
 
@@ -73,6 +103,42 @@ router.post('/auth/google', validate({ body: googleAuthBody }), async (req, res)
   const user = getUserByGoogleId.get(identity.googleId);
   // Invalidate any session token issued to this account before now, then
   // sign the new one with the bumped version.
+  const tokenVersion = revokeSessions(user.id);
+  const token = signSessionToken(user.id, tokenVersion);
+
+  res.json({ token, user: toUserResponse(user), preferences: toPreferencesResponse(getPreferences.get(user.id)) });
+});
+
+// Same shape as /auth/google, for Sign in with Apple (Apple Guideline 4.8
+// requires offering it alongside Google). See docs/apple-sign-in.md. The
+// identity token is verified against Apple's JWKS; `fullName` is whatever
+// the client captured on the first authorization (Apple never repeats it).
+router.post('/auth/apple', validate({ body: appleAuthBody }), async (req, res) => {
+  const { identityToken, fullName } = req.body;
+
+  let identity;
+  try {
+    identity = await verifyAppleIdentityToken(identityToken);
+  } catch (err) {
+    logger.warn({ err: err.message }, 'apple identity token verification failed');
+    res.status(401).json({ error: 'Invalid Apple identity token' });
+    return;
+  }
+
+  const name =
+    [fullName?.givenName, fullName?.familyName].filter(Boolean).join(' ').trim() || null;
+
+  const existing = getUserByAppleId.get(identity.appleId);
+  if (!existing && !identity.email) {
+    // Can't create an account with no email; a return visit is fine since
+    // the stored one is kept.
+    logger.warn({ appleId: identity.appleId }, 'apple sign-in with no email for a new account');
+    res.status(400).json({ error: 'Apple did not provide an email for this account' });
+    return;
+  }
+
+  upsertAppleUser.run({ appleId: identity.appleId, email: identity.email ?? null, name });
+  const user = getUserByAppleId.get(identity.appleId);
   const tokenVersion = revokeSessions(user.id);
   const token = signSessionToken(user.id, tokenVersion);
 
