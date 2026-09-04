@@ -138,13 +138,12 @@ router.put('/me/preferences', requireAuth, validate({ body: preferencesBody }), 
 // account creation (Apple guideline 5.1.1(v)). Foreign keys are enforced
 // (better-sqlite3 default) with no ON DELETE CASCADE, so every table that
 // references the user is cleared explicitly, child rows before the users
-// row, in one transaction. push_subscriptions is keyed by device token,
-// not user_id, so it isn't touched here - a deleted account simply stops
-// being able to sign in; its device keeps whatever notification cadence
-// it set until it changes it.
+// row, in one transaction. push_subscriptions.user_id is nullable (guests
+// stay NULL), so this only removes rows for *this* account's devices.
 const deleteAccount = db.transaction((userId) => {
   db.prepare('DELETE FROM read_events WHERE user_id = ?').run(userId);
   db.prepare('DELETE FROM bookmarks WHERE user_id = ?').run(userId);
+  db.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').run(userId);
   db.prepare('DELETE FROM user_preferences WHERE user_id = ?').run(userId);
   db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 });
