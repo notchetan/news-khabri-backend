@@ -109,6 +109,11 @@ don't reach for a migration library, and don't assume a fresh
 `CREATE TABLE` will pick up a new column on an existing `articles.db` —
 it won't, the guarded `ALTER TABLE` is what does.
 
+The connection opens in `journal_mode = WAL` / `synchronous = NORMAL` (a
+no-op for the `:memory:` test DB) — so a real deployment's `articles.db`
+grows `-wal` / `-shm` sidecar files; back up / copy all three together,
+or checkpoint first.
+
 ## `require.main === module` — side effects only run when launched directly
 
 `src/index.js` gates cron scheduling, the initial `refreshSourcesAndFetch()`
