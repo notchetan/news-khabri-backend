@@ -307,4 +307,15 @@ db.exec(`
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON bookmarks(user_id, created_at)');
 
+// Guards a cron job against running twice at once - see
+// services/cron-lock.js and docs/cron-locking.md. One row per job name,
+// held only while that job is actually running.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS cron_locks (
+    job_name TEXT PRIMARY KEY,
+    holder_id TEXT NOT NULL,
+    locked_at TEXT NOT NULL
+  )
+`);
+
 module.exports = db;
