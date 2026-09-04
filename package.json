@@ -1,15 +1,23 @@
 {
   "name": "news-khabri-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Backend for News Khabri: pulls Indian-publisher RSS feeds, clusters same-event coverage into stories, ranks them, and serves a small REST API.",
+  "main": "src/index.js",
   "scripts": {
+    "start": "node src/index.js",
     "test": "jest",
     "test:coverage": "jest --coverage"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "news",
+    "rss",
+    "clustering",
+    "express",
+    "sqlite"
+  ],
+  "author": "Chetan Shetty",
   "license": "ISC",
+  "private": true,
   "type": "commonjs",
   "engines": {
     "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
