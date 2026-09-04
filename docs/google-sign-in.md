@@ -14,6 +14,20 @@ request - it never re-sends the Google token. This is the standard shape
 for a mobile app backed by Google Sign-In: Google is only involved in the
 initial identity handshake, not in every request afterward.
 
+### Session token revocation (`users.token_version`)
+
+The JWT carries a 30-day expiry and no server-side session store, so it
+can't be individually revoked. Instead each `users` row has a
+`token_version` that **`POST /auth/google` bumps on every fresh sign-in**
+(`revokeSessions`), and the value is baked into the token as a `tv` claim.
+`verifySessionToken` rejects any token whose `tv` doesn't match the
+account's current `token_version` - or whose `users` row is gone (account
+deleted). So: signing in again anywhere invalidates every older token for
+that account (a leaked one, an old device), and `DELETE /me` kills all of
+them immediately. The cost is that a fresh sign-in on device B logs
+device A out - acceptable for this app; most readers are single-device or
+would re-auth anyway.
+
 ## Why the Web client ID, not an Android-specific one
 
 `@react-native-google-signin/google-signin` is configured with a single

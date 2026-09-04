@@ -189,6 +189,15 @@ db.exec(`
   )
 `);
 
+// Bumped on every fresh sign-in; embedded in the session JWT as `tv` and
+// checked on every request - so an older token (a leaked one, a stale
+// device) stops verifying the moment the real user signs in again. See
+// services/auth.js.
+const userColumns = db.prepare('PRAGMA table_info(users)').all();
+if (!userColumns.some((c) => c.name === 'token_version')) {
+  db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0');
+}
+
 // One row per signed-in user - the account-linked counterpart to the
 // several preferences that otherwise live only in the app's own
 // AsyncStorage (theme/font size/debug mode/language/sources/notification
