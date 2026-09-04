@@ -63,7 +63,8 @@ Pipeline, in order:
 ## The core convention: config files, not inline numbers
 
 Every tunable threshold/weight lives in a dedicated `*-config.js` file
-(`clustering-config.js`, `ranking-config.js`, `tier-config.js`) — the
+(`clustering-config.js`, `ranking-config.js`, `tier-config.js`,
+`retention-config.js`, `push-notifications-config.js`) — the
 logic files (`clustering.js`, `ranking.js`, etc.) never hardcode a
 number. **Read the comments in these config files before touching any
 threshold.** They're not generic explanations — most of them cite a

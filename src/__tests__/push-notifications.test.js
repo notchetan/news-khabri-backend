@@ -21,6 +21,7 @@ const db = require('../db');
 const { Expo } = require('expo-server-sdk');
 const { chunkPushNotifications, sendPushNotificationsAsync, isExpoPushToken } = Expo.__mocks;
 const { sendTrendingNotifications, isDue, getTopStory } = require('../services/push-notifications');
+const { MAX_NOTIFICATIONS_PER_TICK } = require('../services/push-notifications-config');
 
 function insertArticle(overrides = {}) {
   const article = {
@@ -209,6 +210,31 @@ describe('sendTrendingNotifications', () => {
     ]);
     const row = db.prepare('SELECT last_notified_at FROM push_subscriptions WHERE id = ?').get(id);
     expect(row.last_notified_at).toBe(now.toISOString());
+  });
+
+  test('caps notifications per tick and drains the backlog over subsequent ticks', async () => {
+    activeStory('en');
+    const total = MAX_NOTIFICATIONS_PER_TICK + 5;
+    for (let i = 0; i < total; i++) {
+      insertSubscription({ push_token: `ExponentPushToken[bulk${i}]`, last_notified_at: null });
+    }
+
+    const tick1 = new Date('2026-08-26T10:00:00Z');
+    await sendTrendingNotifications(tick1);
+    expect(sendPushNotificationsAsync.mock.calls[0][0]).toHaveLength(
+      MAX_NOTIFICATIONS_PER_TICK
+    );
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS n FROM push_subscriptions WHERE last_notified_at IS NULL')
+        .get().n
+    ).toBe(5);
+
+    // A tick a few seconds later: the 200 just notified aren't due again,
+    // so only the 5 leftovers go out.
+    sendPushNotificationsAsync.mockClear();
+    await sendTrendingNotifications(new Date('2026-08-26T10:00:05Z'));
+    expect(sendPushNotificationsAsync.mock.calls[0][0]).toHaveLength(5);
   });
 
   test('localises the notification title to the subscription language', async () => {

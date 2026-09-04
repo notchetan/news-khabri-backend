@@ -4,6 +4,7 @@ const { rankStories } = require('./story-ranking');
 const { STORY_FEED_POOL_SIZE } = require('./clustering-config');
 const { loadMembersByStoryId } = require('../routes/stories');
 const { trendingTitle } = require('./notification-strings');
+const { MAX_NOTIFICATIONS_PER_TICK } = require('./push-notifications-config');
 const logger = require('../logger');
 
 const expo = new Expo();
@@ -45,7 +46,16 @@ async function sendTrendingNotifications(now = new Date()) {
   const subscriptions = db
     .prepare('SELECT * FROM push_subscriptions WHERE interval_minutes > 0')
     .all()
-    .filter((s) => isDue(s, now));
+    .filter((s) => isDue(s, now))
+    // Longest-waiting first, then cap per tick - a backlog after missed
+    // ticks drains oldest-first over several ticks instead of one burst
+    // to the whole base. See push-notifications-config.js.
+    .sort((a, b) => {
+      if (!a.last_notified_at) return -1;
+      if (!b.last_notified_at) return 1;
+      return a.last_notified_at.localeCompare(b.last_notified_at);
+    })
+    .slice(0, MAX_NOTIFICATIONS_PER_TICK);
   if (subscriptions.length === 0) return;
 
   // One ranking pass per language, not per device - every device on the
