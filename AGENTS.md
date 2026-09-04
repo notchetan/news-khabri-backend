@@ -124,6 +124,19 @@ no-op for the `:memory:` test DB) — so a real deployment's `articles.db`
 grows `-wal` / `-shm` sidecar files; back up / copy all three together,
 or checkpoint first.
 
+`db/index.js` growing longer as more tables/columns land is the expected
+shape of this approach, not a problem to fix by introducing a numbered-
+migrations runner — that was floated once and deliberately not adopted;
+a migration framework buys ordering/rollback machinery this single-file
+SQLite app with no team of migration authors doesn't need, at the cost of
+another layer to learn and debug. The one real, fixable issue this file
+did have — the one-time `articles_fts` backfill re-running a full
+`COUNT(*)` scan of both `articles` and `articles_fts` on *every* boot
+forever, not just checking whether the backfill had already happened —
+is fixed: `EXISTS (... LIMIT 1)` instead of `COUNT(*)`, so it's O(1) once
+either table has a single row, which is true on every boot after the
+first.
+
 ## `require.main === module` — side effects only run when launched directly
 
 `src/index.js` gates cron scheduling, the initial `refreshSourcesAndFetch()`
