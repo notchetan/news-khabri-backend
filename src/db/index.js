@@ -74,8 +74,12 @@ db.exec(`
 // table existed - a fresh install has nothing to backfill (loop body never
 // runs), an existing install gets every row indexed once, and every article
 // from then on stays in sync via syncArticleFts at its own insert/update site.
-const ftsIsEmpty = db.prepare('SELECT COUNT(*) AS count FROM articles_fts').get().count === 0;
-const articlesExist = db.prepare('SELECT COUNT(*) AS count FROM articles').get().count > 0;
+// EXISTS (LIMIT 1), not COUNT(*): this runs on every single boot forever,
+// not just once, and both tables only grow - COUNT(*) is a full scan every
+// time, where checking for just one row stops immediately once either table
+// has anything in it (which, past the very first backfill, is always).
+const ftsIsEmpty = !db.prepare('SELECT 1 FROM articles_fts LIMIT 1').get();
+const articlesExist = !!db.prepare('SELECT 1 FROM articles LIMIT 1').get();
 if (ftsIsEmpty && articlesExist) {
   const insertFtsRow = db.prepare(
     'INSERT INTO articles_fts(rowid, title, description, content) VALUES (?, ?, ?, ?)'
