@@ -1,5 +1,6 @@
 const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
+const db = require('../db');
 
 // See docs/google-sign-in.md for where this comes from (Google Cloud
 // Console's Web application OAuth client) and why the *web* client id is
@@ -39,20 +40,45 @@ async function verifyGoogleIdToken(idToken) {
   };
 }
 
-function signSessionToken(userId) {
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: SESSION_TOKEN_TTL });
+function signSessionToken(userId, tokenVersion = 0) {
+  return jwt.sign({ userId, tv: tokenVersion }, JWT_SECRET, {
+    expiresIn: SESSION_TOKEN_TTL,
+  });
 }
 
-// Returns the userId, or null for a missing/invalid/expired token - never
-// throws, so callers (the requireAuth middleware) can treat any failure
-// uniformly as "not signed in" rather than needing their own try/catch.
+// Bumps the account's token_version so every session token issued before
+// now stops verifying. Called on each fresh sign-in (routes/auth.js);
+// returns the new version so the caller can sign the new token with it.
+const bumpTokenVersion = db.prepare(
+  'UPDATE users SET token_version = token_version + 1 WHERE id = ?'
+);
+const getTokenVersion = db.prepare('SELECT token_version FROM users WHERE id = ?');
+function revokeSessions(userId) {
+  bumpTokenVersion.run(userId);
+  return getTokenVersion.get(userId).token_version;
+}
+
+// Returns the userId, or null for a missing/invalid/expired token, a
+// deleted user, or a token whose `tv` claim no longer matches the
+// account's current token_version - never throws, so callers (requireAuth)
+// can treat any failure uniformly as "not signed in".
 function verifySessionToken(token) {
   if (!token) return null;
+  let payload;
   try {
-    return jwt.verify(token, JWT_SECRET).userId;
+    payload = jwt.verify(token, JWT_SECRET);
   } catch {
     return null;
   }
+  if (payload.userId == null) return null;
+  const row = getTokenVersion.get(payload.userId);
+  if (!row || (payload.tv ?? 0) !== row.token_version) return null;
+  return payload.userId;
 }
 
-module.exports = { verifyGoogleIdToken, signSessionToken, verifySessionToken };
+module.exports = {
+  verifyGoogleIdToken,
+  signSessionToken,
+  verifySessionToken,
+  revokeSessions,
+};

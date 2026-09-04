@@ -113,6 +113,21 @@ describe('GET /me', () => {
     const res = await request(app).get('/me').set('Authorization', 'Bearer not-a-real-token');
     expect(res.status).toBe(401);
   });
+
+  test('a fresh sign-in invalidates the previous session token for that account', async () => {
+    mockGoogleIdentity();
+    const first = await request(app).post('/auth/google').send({ idToken: 'valid-token' });
+    const oldToken = first.body.token;
+
+    // Same account signs in again (new device, or re-auth).
+    mockGoogleIdentity();
+    const second = await request(app).post('/auth/google').send({ idToken: 'valid-token' });
+    const newToken = second.body.token;
+
+    expect(newToken).not.toBe(oldToken);
+    expect((await request(app).get('/me').set('Authorization', `Bearer ${oldToken}`)).status).toBe(401);
+    expect((await request(app).get('/me').set('Authorization', `Bearer ${newToken}`)).status).toBe(200);
+  });
 });
 
 describe('PUT /me/preferences', () => {
@@ -253,8 +268,10 @@ describe('DELETE /me', () => {
     const { token } = await signIn();
     await request(app).delete('/me').set('Authorization', `Bearer ${token}`);
 
+    // verifySessionToken can't find the user row, so requireAuth 401s
+    // before the handler ever runs.
     const res = await request(app).get('/me').set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
   });
 
   test('signing in again after deletion creates a fresh account', async () => {

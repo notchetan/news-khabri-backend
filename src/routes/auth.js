@@ -1,7 +1,7 @@
 const express = require('express');
 const { z } = require('zod');
 const db = require('../db');
-const { verifyGoogleIdToken, signSessionToken } = require('../services/auth');
+const { verifyGoogleIdToken, signSessionToken, revokeSessions } = require('../services/auth');
 const requireAuth = require('../middleware/require-auth');
 const validate = require('../middleware/validate');
 const logger = require('../logger');
@@ -71,7 +71,10 @@ router.post('/auth/google', validate({ body: googleAuthBody }), async (req, res)
     avatarUrl: identity.avatarUrl,
   });
   const user = getUserByGoogleId.get(identity.googleId);
-  const token = signSessionToken(user.id);
+  // Invalidate any session token issued to this account before now, then
+  // sign the new one with the bumped version.
+  const tokenVersion = revokeSessions(user.id);
+  const token = signSessionToken(user.id, tokenVersion);
 
   res.json({ token, user: toUserResponse(user), preferences: toPreferencesResponse(getPreferences.get(user.id)) });
 });
