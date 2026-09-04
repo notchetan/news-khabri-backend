@@ -138,6 +138,12 @@ The listener itself (still inside that guard) reads `PORT` from the
 environment and installs a `SIGTERM`/`SIGINT` handler that `server.close()`s
 and `db.close()`s before exit, with a 10s force-exit fallback.
 
+Every scheduled job (and the initial `refreshSourcesAndFetch()` call) is
+wrapped in `services/cron-lock.js`'s `withCronLock(jobName, fn)` — a DB-row
+lock, not an in-memory flag, so a job whose run outlasts its own cron
+interval can't start a second overlapping run of itself. See
+`docs/cron-locking.md`. Wrap any new scheduled job in it too.
+
 ## App-level middleware: helmet, CORS allowlist, rate limits, `/healthz`
 
 `app` (module scope, so route tests see it too) is wrapped in `helmet()`,

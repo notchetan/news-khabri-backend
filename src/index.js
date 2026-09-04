@@ -17,6 +17,7 @@ const { TIER_CRON, TIER_RECOMPUTE_CRON, DEFAULT_TIER } = require('./services/tie
 const { sendTrendingNotifications } = require('./services/push-notifications');
 const { pruneRetention } = require('./services/retention');
 const { RETENTION_CRON } = require('./services/retention-config');
+const { withCronLock } = require('./services/cron-lock');
 const articlesRouter = require('./routes/articles');
 const storiesRouter = require('./routes/stories');
 const pushRouter = require('./routes/push');
@@ -110,27 +111,38 @@ async function fetchTier(tier) {
 // imports `app` for supertest, which would otherwise trigger live fetches
 // and an unwanted extra port binding on every test run.
 if (require.main === module) {
-  // See "Cron orchestration" in docs/tier-system.md.
-  refreshSourcesAndFetch();
-  cron.schedule('0 3 * * *', refreshSourcesAndFetch);
-  cron.schedule(TIER_RECOMPUTE_CRON, () => recomputeSourceTiers());
+  // Every job is wrapped in withCronLock - a slow run outlasting its own
+  // interval (or, if this process is ever scaled horizontally, two
+  // instances' identical schedules firing together) would otherwise
+  // double-fetch and double-notify. See docs/cron-locking.md.
 
-  cron.schedule(TIER_CRON.fast, () => fetchTier('fast'));
-  cron.schedule(TIER_CRON.medium, () => fetchTier('medium'));
-  cron.schedule(TIER_CRON.slow, () => fetchTier('slow'));
+  // See "Cron orchestration" in docs/tier-system.md.
+  withCronLock('refreshSourcesAndFetch', refreshSourcesAndFetch);
+  cron.schedule('0 3 * * *', () => withCronLock('refreshSourcesAndFetch', refreshSourcesAndFetch));
+  cron.schedule(TIER_RECOMPUTE_CRON, () =>
+    withCronLock('recomputeSourceTiers', () => recomputeSourceTiers())
+  );
+
+  cron.schedule(TIER_CRON.fast, () => withCronLock('fetchTier:fast', () => fetchTier('fast')));
+  cron.schedule(TIER_CRON.medium, () => withCronLock('fetchTier:medium', () => fetchTier('medium')));
+  cron.schedule(TIER_CRON.slow, () => withCronLock('fetchTier:slow', () => fetchTier('slow')));
 
   // Every 5 minutes - the finest interval a device can choose (see
   // push.js's VALID_INTERVALS) - sendTrendingNotifications itself only
   // actually notifies whichever devices are due (see push-notifications.js's
   // isDue), so this doesn't over-notify anyone on a longer interval.
-  cron.schedule('*/5 * * * *', () => sendTrendingNotifications());
+  cron.schedule('*/5 * * * *', () =>
+    withCronLock('sendTrendingNotifications', () => sendTrendingNotifications())
+  );
 
   // Trim the two append-only tables to their rolling windows so they
   // don't grow forever - see services/retention-config.js.
-  cron.schedule(RETENTION_CRON, () => {
-    const { readEvents, clusterDecisions } = pruneRetention();
-    logger.info({ readEvents, clusterDecisions }, 'retention prune');
-  });
+  cron.schedule(RETENTION_CRON, () =>
+    withCronLock('pruneRetention', async () => {
+      const { readEvents, clusterDecisions } = pruneRetention();
+      logger.info({ readEvents, clusterDecisions }, 'retention prune');
+    })
+  );
 
   const PORT = process.env.PORT || 3000;
   const server = app.listen(PORT, '0.0.0.0', () => logger.info({ port: PORT }, 'server listening'));

@@ -87,3 +87,7 @@ regardless of which tier triggered it.
 `sourceNamesForTier` falls back every publisher with no tier computed yet
 (just discovered, or added before the first daily recompute has run) to
 `DEFAULT_TIER` rather than silently excluding it from every tier's fetch.
+
+Every job scheduled here is wrapped in `withCronLock` - see
+`docs/cron-locking.md` for why (a slow tick can genuinely outlast its own
+interval, which would otherwise start a second overlapping run of itself).
