@@ -34,6 +34,7 @@ beforeEach(() => {
   // read_events/bookmarks point at it too.
   db.exec('DELETE FROM read_events');
   db.exec('DELETE FROM bookmarks');
+  db.exec('DELETE FROM push_subscriptions');
   db.exec('DELETE FROM user_preferences');
   db.exec('DELETE FROM users');
   db.exec('DELETE FROM articles');
@@ -234,6 +235,9 @@ describe('DELETE /me', () => {
     db.prepare(
       'INSERT INTO read_events (user_id, article_id, story_id, category, source, entities_json) VALUES (?, ?, ?, ?, ?, ?)'
     ).run(userId, 1, null, 'national', 'NDTV', null);
+    db.prepare(
+      'INSERT INTO push_subscriptions (push_token, interval_minutes, user_id) VALUES (?, ?, ?)'
+    ).run('ExponentPushToken[del]', 15, userId);
 
     const res = await request(app).delete('/me').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(204);
@@ -242,6 +246,7 @@ describe('DELETE /me', () => {
     expect(db.prepare('SELECT 1 FROM user_preferences WHERE user_id = ?').get(userId)).toBeUndefined();
     expect(db.prepare('SELECT COUNT(*) AS n FROM bookmarks WHERE user_id = ?').get(userId).n).toBe(0);
     expect(db.prepare('SELECT COUNT(*) AS n FROM read_events WHERE user_id = ?').get(userId).n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM push_subscriptions WHERE user_id = ?').get(userId).n).toBe(0);
   });
 
   test('the old session token no longer resolves to an account afterwards', async () => {

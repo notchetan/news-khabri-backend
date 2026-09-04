@@ -48,15 +48,15 @@ racing on the *same* field is still last-writer-wins for that one field.
 Foreign keys are enforced (better-sqlite3's default) but no table declares
 `ON DELETE CASCADE`, so account deletion can't lean on the parent delete
 alone. `DELETE /me` (auth required) runs one transaction that clears
-`read_events`, `bookmarks`, and `user_preferences` for the user - child
-rows first - and then the `users` row itself. Add any future
-user-referencing table to that transaction in `routes/auth.js`.
-`push_subscriptions` is deliberately not in it: it's keyed by device push
-token, not `user_id`, so there's nothing there to attribute to the
-account. The app stores are the reason this exists at all (Apple
-guideline 5.1.1(v)). The old session JWT stays signature-valid until it
-expires, but every authed route returns 404 once the `users` row is gone,
-and the app drops its stored token on a successful delete.
+`read_events`, `bookmarks`, `push_subscriptions`, and `user_preferences`
+for the user - child rows first - and then the `users` row itself. Add
+any future user-referencing table to that transaction in `routes/auth.js`.
+`push_subscriptions.user_id` is nullable (guest devices stay `NULL`), so
+this only removes rows for *this* account's devices. The app stores are
+the reason this exists at all (Apple guideline 5.1.1(v)). The old session
+JWT stays signature-valid until it expires, but every authed route returns
+404 once the `users` row is gone, and the app drops its stored token on a
+successful delete.
 
 ## `JWT_SECRET` fails loudly outside tests
 

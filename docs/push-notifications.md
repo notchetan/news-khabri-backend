@@ -19,13 +19,20 @@ budget, so a 5-minute interval is actually a 5-minute interval.
 `push_token` (Expo's own token format, e.g. `ExponentPushToken[...]`,
 unique), `interval_minutes` (0 = off - see `routes/push.js`'s
 `VALID_INTERVALS`), `language` (which language's trending story this
-device wants), `last_notified_at`.
+device wants), `last_notified_at`, `user_id` (nullable - the account the
+device was signed into when it last registered; guests stay `NULL`).
 
 `POST /push-subscriptions` upserts by `push_token` - called every time the
 interval or language preference changes, not just once at signup, so
 switching from "Off" to "15m" (or switching language) takes effect on the
 very next cron tick rather than requiring a fresh install-time
-registration.
+registration. It's **anonymous by design** (guests get notifications
+too), but an `Authorization: Bearer` header - sent when the device is
+signed in - sets `user_id`, and a re-register after sign-out (no header)
+nulls it back out. The endpoint also rejects anything
+`Expo.isExpoPushToken` doesn't accept. `DELETE /push-subscriptions
+{ pushToken }` (no auth - the caller holds the token) is how a device
+forgets its own subscription on sign-out.
 
 ## Cron cadence and due-checking
 

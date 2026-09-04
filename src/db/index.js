@@ -165,6 +165,15 @@ db.exec(`
   )
 `);
 
+// Nullable link to the account a device was signed into when it last
+// registered (guests stay NULL) - lets DELETE /me clean up a user's
+// subscriptions, and re-registering after sign-out nulls it back out.
+const pushSubColumns = db.prepare('PRAGMA table_info(push_subscriptions)').all();
+if (!pushSubColumns.some((c) => c.name === 'user_id')) {
+  db.exec('ALTER TABLE push_subscriptions ADD COLUMN user_id INTEGER REFERENCES users(id)');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)');
+
 // One row per Google account that has ever signed in - see
 // docs/google-sign-in.md. google_id is the token's own `sub` claim, the
 // stable per-account identifier Google itself guarantees never changes
