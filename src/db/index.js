@@ -1,6 +1,15 @@
 const Database = require('better-sqlite3');
 const db = new Database(process.env.DB_PATH || 'articles.db');
 
+// WAL lets the cron's writes and an incoming request's reads proceed
+// concurrently instead of blocking each other, and survives a crash
+// mid-write far better than the default rollback journal. No-op for the
+// `:memory:` DB the tests use. NORMAL sync is the standard, safe pairing
+// with WAL (durable across app crashes; a full OS crash could lose the
+// last transaction, which for an RSS cache is fine).
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS articles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
