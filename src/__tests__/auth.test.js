@@ -12,6 +12,14 @@ jest.mock('google-auth-library', () => ({
   })),
 }));
 
+// Apple's identity-token verification is jose against Apple's JWKS - never
+// hit for real here; jwtVerify is driven per-test.
+const mockAppleJwtVerify = jest.fn();
+jest.mock('jose', () => ({
+  createRemoteJWKSet: jest.fn(() => ({})),
+  jwtVerify: (...args) => mockAppleJwtVerify(...args),
+}));
+
 const request = require('supertest');
 const db = require('../db');
 const app = require('../index');
@@ -25,6 +33,18 @@ function mockGoogleIdentity(overrides = {}) {
     ...overrides,
   };
   mockVerifyIdToken.mockResolvedValue({ getPayload: () => payload });
+  return payload;
+}
+
+function mockAppleIdentity(overrides = {}) {
+  const payload = {
+    sub: 'apple-user-1',
+    email: 'chetan@privaterelay.appleid.com',
+    iss: 'https://appleid.apple.com',
+    aud: 'com.newskhabri.app',
+    ...overrides,
+  };
+  mockAppleJwtVerify.mockResolvedValue({ payload });
   return payload;
 }
 
@@ -85,6 +105,97 @@ describe('POST /auth/google', () => {
     const res = await request(app).post('/auth/google').send({ idToken: 'bad-token' });
 
     expect(res.status).toBe(401);
+  });
+});
+
+describe('POST /auth/apple', () => {
+  test('creates a new user from the identity token and the first-time fullName', async () => {
+    mockAppleIdentity();
+
+    const res = await request(app)
+      .post('/auth/apple')
+      .send({
+        identityToken: 'valid-token',
+        fullName: { givenName: 'Chetan', familyName: 'Shetty' },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.token).toEqual(expect.any(String));
+    expect(res.body.user).toEqual({
+      id: expect.any(Number),
+      email: 'chetan@privaterelay.appleid.com',
+      name: 'Chetan Shetty',
+      avatarUrl: null,
+    });
+    expect(res.body.preferences).toBeNull();
+
+    const row = db.prepare('SELECT * FROM users WHERE apple_id = ?').get('apple-user-1');
+    expect(row).toMatchObject({ email: 'chetan@privaterelay.appleid.com', name: 'Chetan Shetty', google_id: null });
+  });
+
+  test('a return sign-in (no fullName - Apple never repeats it) keeps the stored name', async () => {
+    mockAppleIdentity();
+    await request(app)
+      .post('/auth/apple')
+      .send({ identityToken: 't1', fullName: { givenName: 'Chetan', familyName: 'Shetty' } });
+
+    mockAppleIdentity();
+    const res = await request(app).post('/auth/apple').send({ identityToken: 't2' });
+
+    const rows = db.prepare('SELECT * FROM users WHERE apple_id = ?').all('apple-user-1');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('Chetan Shetty');
+    expect(res.body.user.name).toBe('Chetan Shetty');
+  });
+
+  test('a fresh sign-in invalidates the previous session token for that Apple account', async () => {
+    mockAppleIdentity();
+    const first = await request(app).post('/auth/apple').send({ identityToken: 't1' });
+    mockAppleIdentity();
+    const second = await request(app).post('/auth/apple').send({ identityToken: 't2' });
+
+    expect(second.body.token).not.toBe(first.body.token);
+    expect(
+      (await request(app).get('/me').set('Authorization', `Bearer ${first.body.token}`)).status
+    ).toBe(401);
+    expect(
+      (await request(app).get('/me').set('Authorization', `Bearer ${second.body.token}`)).status
+    ).toBe(200);
+  });
+
+  test('rejects an identity token that fails verification', async () => {
+    mockAppleJwtVerify.mockRejectedValue(new Error('signature verification failed'));
+
+    const res = await request(app).post('/auth/apple').send({ identityToken: 'bad-token' });
+
+    expect(res.status).toBe(401);
+  });
+
+  test('rejects a missing identityToken', async () => {
+    const res = await request(app).post('/auth/apple').send({});
+    expect(res.status).toBe(400);
+  });
+
+  test('rejects a new account when Apple provides no email', async () => {
+    mockAppleIdentity({ email: undefined });
+
+    const res = await request(app).post('/auth/apple').send({ identityToken: 'valid-token' });
+
+    expect(res.status).toBe(400);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM users').get().n).toBe(0);
+  });
+
+  test('a Google user and an Apple user coexist as separate rows', async () => {
+    mockGoogleIdentity();
+    await request(app).post('/auth/google').send({ idToken: 'g' });
+    mockAppleIdentity();
+    await request(app).post('/auth/apple').send({ identityToken: 'a' });
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM users').get().n).toBe(2);
+    expect(db.prepare('SELECT google_id, apple_id FROM users ORDER BY id').all()).toEqual([
+      { google_id: 'google-user-1', apple_id: null },
+      { google_id: null, apple_id: 'apple-user-1' },
+    ]);
   });
 });
 

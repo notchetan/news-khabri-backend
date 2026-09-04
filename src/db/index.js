@@ -183,29 +183,77 @@ if (!pushSubColumns.some((c) => c.name === 'user_id')) {
 }
 db.exec('CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)');
 
-// One row per Google account that has ever signed in - see
-// docs/google-sign-in.md. google_id is the token's own `sub` claim, the
-// stable per-account identifier Google itself guarantees never changes
-// (email can, in principle, be edited on the Google account).
+// One row per account that has ever signed in - see docs/google-sign-in.md
+// and docs/apple-sign-in.md. google_id / apple_id are the provider token's
+// own `sub` claim, the stable per-account identifier the provider
+// guarantees never changes (email can, in principle, be edited). A row has
+// exactly one of the two set. Fresh installs get this shape directly; an
+// existing google-only DB is migrated below.
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    google_id TEXT UNIQUE NOT NULL,
+    google_id TEXT,
+    apple_id TEXT,
     email TEXT NOT NULL,
     name TEXT,
     avatar_url TEXT,
+    token_version INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )
 `);
 
-// Bumped on every fresh sign-in; embedded in the session JWT as `tv` and
-// checked on every request - so an older token (a leaked one, a stale
-// device) stops verifying the moment the real user signs in again. See
-// services/auth.js.
+// token_version: bumped on every fresh sign-in; embedded in the session
+// JWT as `tv` and checked on every request - so an older token (a leaked
+// one, a stale device) stops verifying the moment the real user signs in
+// again. See services/auth.js.
 const userColumns = db.prepare('PRAGMA table_info(users)').all();
 if (!userColumns.some((c) => c.name === 'token_version')) {
   db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0');
 }
+if (!userColumns.some((c) => c.name === 'apple_id')) {
+  db.exec('ALTER TABLE users ADD COLUMN apple_id TEXT');
+}
+
+// The original schema had `google_id TEXT UNIQUE NOT NULL` (Google was the
+// only provider). An Apple-only account has no google_id, so that
+// constraint has to go - and SQLite can't ALTER a NOT NULL away, so the
+// table is rebuilt once. Guarded on the constraint still being present, so
+// it's a no-op on every boot after (and never runs on a fresh install,
+// which already gets the new CREATE TABLE above). Standard SQLite
+// table-rebuild: foreign_keys OFF, swap inside a transaction, back ON.
+const googleIdColumn = db.prepare('PRAGMA table_info(users)').all().find((c) => c.name === 'google_id');
+if (googleIdColumn && googleIdColumn.notnull === 1) {
+  db.pragma('foreign_keys = OFF');
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE users_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        google_id TEXT,
+        apple_id TEXT,
+        email TEXT NOT NULL,
+        name TEXT,
+        avatar_url TEXT,
+        token_version INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec(`
+      INSERT INTO users_new (id, google_id, apple_id, email, name, avatar_url, token_version, created_at)
+      SELECT id, google_id, apple_id, email, name, avatar_url, token_version, created_at FROM users
+    `);
+    db.exec('DROP TABLE users');
+    db.exec('ALTER TABLE users_new RENAME TO users');
+  })();
+  db.pragma('foreign_keys = ON');
+}
+
+// One unique index per provider id. A plain (non-partial) unique index is
+// fine on a nullable column - SQLite treats every NULL as distinct, so all
+// the Apple-only rows sharing google_id = NULL don't collide, and
+// routes/auth.js's `ON CONFLICT(google_id)` / `ON CONFLICT(apple_id)`
+// upserts still resolve against it.
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_apple_id ON users(apple_id)');
 
 // One row per signed-in user - the account-linked counterpart to the
 // several preferences that otherwise live only in the app's own
