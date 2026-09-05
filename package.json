@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "jest",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "revoke-sessions": "node src/scripts/revoke-all-sessions.js"
   },
   "keywords": [
     "news",
