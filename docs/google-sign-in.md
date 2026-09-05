@@ -28,6 +28,16 @@ them immediately. The cost is that a fresh sign-in on device B logs
 device A out - acceptable for this app; most readers are single-device or
 would re-auth anyway.
 
+The same counter is what makes a *fleet-wide* revocation possible:
+`src/scripts/revoke-all-sessions.js` (`npm run revoke-sessions -- --yes`)
+bumps every row at once, so every token issued before that moment stops
+verifying and every device has to sign in again. It touches no other
+column and no other table. Reach for it when a session token may have
+been exposed in bulk rather than one at a time - the case that prompted
+it was `Authorization` headers being written into request logs, where
+rotating one account at a time would have meant knowing which accounts
+appeared in the logs.
+
 ## Why the Web client ID, not an Android-specific one
 
 `@react-native-google-signin/google-signin` is configured with a single
