@@ -181,6 +181,18 @@ level is `silent`, so the suite is quiet and there's no transport worker
 to leak past Jest; `LOG_LEVEL` overrides. Dev output is `pino-pretty`
 (a devDependency), production is JSON.
 
+`logger.js` sets `redact` paths, and that is not optional decoration:
+`pino-http`'s default serializer logs the *whole* request header block, so
+without it every request line carries the caller's `Authorization: Bearer
+<session JWT>` - a 30-day credential - in plaintext. `loggerOptions` is
+exported alongside the logger purely so
+`__tests__/logger-redaction.test.js` can rebuild an identical logger over a
+capturable stream (pino binds its stdout destination at construction, so
+the singleton's own output can't be intercepted after the fact). Add a path
+there before logging any new credential-shaped field. The client IP
+(`req.remoteAddress`) *is* still logged deliberately - it is what makes a
+rate-limit or abuse trail readable.
+
 ## Request validation: `middleware/validate.js` + colocated zod schemas
 
 Every route that reads a request **body** or a numeric **`:id` path
