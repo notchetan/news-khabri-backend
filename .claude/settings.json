@@ -1,0 +1,20 @@
+{
+  "enabledPlugins": {
+    "claude-code-setup@claude-plugins-official": true,
+    "code-review@claude-plugins-official": true
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-.}/scripts/hooks/verify-on-stop.js\"",
+            "timeout": 300,
+            "statusMessage": "Running backend tests..."
+          }
+        ]
+      }
+    ]
+  }
+}
