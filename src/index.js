@@ -135,12 +135,11 @@ if (require.main === module) {
     withCronLock('sendTrendingNotifications', () => sendTrendingNotifications())
   );
 
-  // Trim the two append-only tables to their rolling windows so they
-  // don't grow forever - see services/retention-config.js.
+  // Trim ingested data to its rolling windows so it doesn't grow forever -
+  // see services/retention-config.js.
   cron.schedule(RETENTION_CRON, () =>
     withCronLock('pruneRetention', async () => {
-      const { readEvents, clusterDecisions } = pruneRetention();
-      logger.info({ readEvents, clusterDecisions }, 'retention prune');
+      logger.info(pruneRetention(), 'retention prune');
     })
   );
 

@@ -46,6 +46,11 @@ if (!columns.some((c) => c.name === 'embedding')) {
   // Stage 3 semantic similarity - see docs/embeddings.md.
   db.exec('ALTER TABLE articles ADD COLUMN embedding BLOB');
 }
+if (!columns.some((c) => c.name === 'last_seen_at')) {
+  // Bumped every time a feed still lists the article - retention prunes on
+  // it, not fetched_at. See docs/retention.md.
+  db.exec('ALTER TABLE articles ADD COLUMN last_seen_at TEXT');
+}
 
 // Every hot-path read (GET /articles, /articles/top's candidate pool,
 // /stories/top's candidate pool) filters on language (+category) and sorts
@@ -310,6 +315,12 @@ db.exec(`
   )
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON bookmarks(user_id, created_at)');
+
+// Child-key indexes for the foreign keys retention deletes through - without
+// them SQLite scans the whole child table for every parent row deleted.
+db.exec('CREATE INDEX IF NOT EXISTS idx_stories_merged_into ON stories(merged_into_story_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_read_events_article ON read_events(article_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_bookmarks_article ON bookmarks(article_id)');
 
 // Guards a cron job against running twice at once - see
 // services/cron-lock.js and docs/cron-locking.md. One row per job name,
