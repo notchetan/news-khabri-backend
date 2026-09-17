@@ -242,6 +242,27 @@ up through ingestion.
   `require.main === module` note above for why this is safe to import
   directly).
 
+## Claude Code automation in this repo
+
+Configured in `.claude/` and `.mcp.json` (both new - this repo previously had
+no Claude config at all, so hooks set up in the frontend did not apply here).
+
+- **Stop -> `scripts/hooks/verify-on-stop.js`.** Runs the jest suite, but only
+  when `git diff HEAD -- src/` is non-empty. Reports via `systemMessage`;
+  non-blocking, since a Stop hook that refuses to stop can loop. Written in
+  plain node - **there is no `jq` on this machine**.
+- **Subagent:** `test-writer`, which encodes this repo's testing rules (a
+  distinct `DB_PATH` per test file, `getEmbedding` always mocked outside
+  `services/embeddings.js`'s own unit tests).
+- **MCP:** `context7`, for version-accurate Express 5 / better-sqlite3 / zod
+  docs. Needs approving via `/mcp` once.
+
+**Watch the working directory.** The frontend (`news-khabri`) is this repo's
+sibling, and a shell's cwd persists between commands - a repo-relative command
+with no leading `cd` can silently run against the wrong repo and return a
+plausible, wrong answer. The frontend has a PreToolUse hook that warns about
+this; from here, just always `cd` explicitly.
+
 ## Repo state
 
 - Hosted at `github.com/notchetan/news-khabri-backend`, public,
