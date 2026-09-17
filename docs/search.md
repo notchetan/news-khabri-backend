@@ -38,6 +38,9 @@ currently:
   scrape that fills in `content`/`image_caption`/`read_time_minutes` on
   first detail view)
 
+Deletes happen in one place: the daily retention prune removes an article's
+FTS row alongside the article - see `docs/retention.md`.
+
 `syncArticleFts` always re-reads the article row rather than trusting the
 caller's own fields, so a partial update (e.g. just backfilling `content`
 later) still produces a complete, correct FTS row instead of blanking out

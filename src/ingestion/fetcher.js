@@ -82,11 +82,14 @@ function extractDescription(item) {
   return raw.replace(/<[^>]+>/g, '').trim() || null;
 }
 
+// last_seen_at is bumped on every sighting so retention never prunes an item
+// a feed still lists - see docs/retention.md.
 const insert = db.prepare(`
-  INSERT INTO articles (title, link, source, category, published_at, image_url, language, description)
-  VALUES (@title, @link, @source, @category, @published_at, @image_url, @language, @description)
-  ON CONFLICT(link) DO UPDATE SET image_url = excluded.image_url
-    WHERE articles.image_url IS NULL AND excluded.image_url IS NOT NULL
+  INSERT INTO articles (title, link, source, category, published_at, image_url, language, description, last_seen_at)
+  VALUES (@title, @link, @source, @category, @published_at, @image_url, @language, @description, CURRENT_TIMESTAMP)
+  ON CONFLICT(link) DO UPDATE SET
+    image_url = COALESCE(articles.image_url, excluded.image_url),
+    last_seen_at = CURRENT_TIMESTAMP
 `);
 // link is UNIQUE, so this reliably finds the row insert.run() just touched
 // whether it was a fresh INSERT or the ON CONFLICT UPDATE path above -

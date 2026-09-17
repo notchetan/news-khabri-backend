@@ -85,6 +85,28 @@ describe('fetchAllFeeds', () => {
     expect(rows).toHaveLength(1);
   });
 
+  test('bumps last_seen_at on every sighting but leaves fetched_at alone (retention prunes on it)', async () => {
+    Parser.prototype.parseURL.mockResolvedValue({
+      items: [{ title: 'Evergreen', link: 'https://example.com/evergreen', pubDate: '2024-03-11' }],
+    });
+    setSources([{ name: 'A', url: 'https://a.example.com/feed', category: 'national', language: 'en' }]);
+
+    await fetchAllFeeds();
+    const old = '2020-01-01 00:00:00';
+    db.prepare('UPDATE articles SET fetched_at = ?, last_seen_at = ? WHERE link = ?').run(
+      old,
+      old,
+      'https://example.com/evergreen'
+    );
+    await fetchAllFeeds();
+
+    const row = db
+      .prepare('SELECT fetched_at, last_seen_at FROM articles WHERE link = ?')
+      .get('https://example.com/evergreen');
+    expect(row.fetched_at).toBe(old);
+    expect(row.last_seen_at > old).toBe(true);
+  });
+
   test('deduplicates the same story listed under different tracking params (e.g. two overlapping category feeds)', async () => {
     setSources([
       { name: 'A', url: 'https://a.example.com/business-feed', category: 'business', language: 'en' },

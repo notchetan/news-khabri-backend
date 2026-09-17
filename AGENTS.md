@@ -96,9 +96,11 @@ table for the article's `id` before trying to reason about it from the
 config alone. `clustering-config.js`'s `LOG_CLUSTER_DECISIONS` flag can
 disable this entirely; the daily retention cron (`services/retention.js`,
 `services/retention-config.js`) also prunes rows older than
-`CLUSTER_DECISIONS_RETENTION_DAYS` (30) - and `read_events` older than
-`READ_EVENTS_RETENTION_DAYS` (90) - so neither append-only table grows
-without bound.
+`CLUSTER_DECISIONS_RETENTION_DAYS` (7) - so query it soon after spotting a
+bad merge. The same cron prunes `read_events` older than
+`READ_EVENTS_RETENTION_DAYS` (90) and whole stories no feed has listed for
+`ARTICLES_RETENTION_DAYS` (60, bookmarked/read ones exempt) - see
+`docs/retention.md`.
 
 ## Schema migrations: a guarded `ALTER TABLE`, not a migration framework
 
