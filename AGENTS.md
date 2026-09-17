@@ -252,10 +252,10 @@ no Claude config at all, so hooks set up in the frontend did not apply here).
 - **Stop -> `scripts/hooks/verify-on-stop.js`.** Runs the jest suite, but only
   when `git diff HEAD -- src/` is non-empty. Reports via `systemMessage`;
   non-blocking, since a Stop hook that refuses to stop can loop. Written in
-  plain node - **there is no `jq` on this machine**.
-- **Subagent:** `test-writer`, which encodes this repo's testing rules (a
-  distinct `DB_PATH` per test file, `getEmbedding` always mocked outside
-  `services/embeddings.js`'s own unit tests).
+  plain node - **there is no `jq` on this machine**. A project's hooks only
+  load from the directory Claude is launched in, and sessions usually start in
+  the frontend with this repo attached - so the frontend's Stop hook invokes
+  this script too. Keep it printing nothing when there's no diff.
 - **MCP:** `context7`, for version-accurate Express 5 / better-sqlite3 / zod
   docs. Needs approving via `/mcp` once.
 
