@@ -1,7 +1,8 @@
 const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
-const { createRemoteJWKSet, jwtVerify } = require('jose');
+const { createRemoteJWKSet, jwtVerify, importPKCS8, SignJWT } = require('jose');
 const db = require('../db');
+const logger = require('../logger');
 
 // See docs/google-sign-in.md for where this comes from (Google Cloud
 // Console's Web application OAuth client) and why the *web* client id is
@@ -62,6 +63,60 @@ async function verifyAppleIdentityToken(identityToken) {
   };
 }
 
+// Apple requires revoking a user's Sign in with Apple tokens when they
+// delete their account (Guideline 5.1.1(v)) - see "Token revocation" in
+// docs/apple-sign-in.md. Both the code exchange and the revoke call need a
+// client secret signed with a Sign in with Apple key (.p8).
+const APPLE_TEAM_ID = process.env.APPLE_TEAM_ID;
+const APPLE_KEY_ID = process.env.APPLE_KEY_ID;
+// Env vars can't hold raw newlines on every host, so accept `\n`-escaped.
+const APPLE_PRIVATE_KEY = process.env.APPLE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+const appleRevocationConfigured = Boolean(APPLE_TEAM_ID && APPLE_KEY_ID && APPLE_PRIVATE_KEY);
+if (!appleRevocationConfigured && process.env.NODE_ENV === 'production') {
+  logger.warn('APPLE_TEAM_ID/APPLE_KEY_ID/APPLE_PRIVATE_KEY unset - Apple tokens will not be revoked on account deletion');
+}
+
+async function appleClientSecret() {
+  const key = await importPKCS8(APPLE_PRIVATE_KEY, 'ES256');
+  return new SignJWT({})
+    .setProtectedHeader({ alg: 'ES256', kid: APPLE_KEY_ID })
+    .setIssuer(APPLE_TEAM_ID)
+    .setIssuedAt()
+    .setExpirationTime('5m')
+    .setAudience(APPLE_ISSUER)
+    .setSubject(APPLE_CLIENT_ID)
+    .sign(key);
+}
+
+async function appleAuthRequest(endpoint, params) {
+  const res = await fetch(`${APPLE_ISSUER}/auth/${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: APPLE_CLIENT_ID,
+      client_secret: await appleClientSecret(),
+      ...params,
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Apple /auth/${endpoint} returned ${res.status}`);
+  return res;
+}
+
+// Trades the one-time authorization code from the app's sign-in for a
+// long-lived refresh token - the thing /auth/revoke later needs. Returns
+// null when no key is configured.
+async function exchangeAppleAuthorizationCode(code) {
+  if (!appleRevocationConfigured) return null;
+  const res = await appleAuthRequest('token', { code, grant_type: 'authorization_code' });
+  return (await res.json()).refresh_token ?? null;
+}
+
+async function revokeAppleToken(refreshToken) {
+  if (!appleRevocationConfigured) return;
+  await appleAuthRequest('revoke', { token: refreshToken, token_type_hint: 'refresh_token' });
+}
+
 function signSessionToken(userId, tokenVersion = 0) {
   return jwt.sign({ userId, tv: tokenVersion }, JWT_SECRET, {
     expiresIn: SESSION_TOKEN_TTL,
@@ -101,6 +156,8 @@ function verifySessionToken(token) {
 module.exports = {
   verifyGoogleIdToken,
   verifyAppleIdentityToken,
+  exchangeAppleAuthorizationCode,
+  revokeAppleToken,
   signSessionToken,
   verifySessionToken,
   revokeSessions,

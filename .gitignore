@@ -22,3 +22,6 @@ coverage/
 # OS
 .DS_Store
 Thumbs.db
+
+# Sign in with Apple private keys - never commit (see docs/apple-sign-in.md)
+*.p8

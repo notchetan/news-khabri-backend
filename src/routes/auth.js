@@ -4,6 +4,8 @@ const db = require('../db');
 const {
   verifyGoogleIdToken,
   verifyAppleIdentityToken,
+  exchangeAppleAuthorizationCode,
+  revokeAppleToken,
   signSessionToken,
   revokeSessions,
 } = require('../services/auth');
@@ -19,6 +21,8 @@ const googleAuthBody = z.object({ idToken: z.string().min(1) });
 // the app forwards through on that first sign-in.
 const appleAuthBody = z.object({
   identityToken: z.string().min(1),
+  // One-time code, exchanged for the refresh token DELETE /me revokes.
+  authorizationCode: z.string().min(1).nullish(),
   fullName: z
     .object({
       givenName: z.string().nullish(),
@@ -57,6 +61,7 @@ const upsertAppleUser = db.prepare(`
     name = COALESCE(users.name, excluded.name)
 `);
 const getUserByAppleId = db.prepare('SELECT * FROM users WHERE apple_id = ?');
+const setAppleRefreshToken = db.prepare('UPDATE users SET apple_refresh_token = ? WHERE apple_id = ?');
 const getUserById = db.prepare('SELECT * FROM users WHERE id = ?');
 const getPreferences = db.prepare('SELECT * FROM user_preferences WHERE user_id = ?');
 
@@ -114,7 +119,7 @@ router.post('/auth/google', validate({ body: googleAuthBody }), async (req, res)
 // identity token is verified against Apple's JWKS; `fullName` is whatever
 // the client captured on the first authorization (Apple never repeats it).
 router.post('/auth/apple', validate({ body: appleAuthBody }), async (req, res) => {
-  const { identityToken, fullName } = req.body;
+  const { identityToken, authorizationCode, fullName } = req.body;
 
   let identity;
   try {
@@ -138,6 +143,16 @@ router.post('/auth/apple', validate({ body: appleAuthBody }), async (req, res) =
   }
 
   upsertAppleUser.run({ appleId: identity.appleId, email: identity.email ?? null, name });
+  if (authorizationCode) {
+    // Best-effort: a failed exchange shouldn't block sign-in, it only
+    // means this sign-in's token can't be revoked later.
+    try {
+      const refreshToken = await exchangeAppleAuthorizationCode(authorizationCode);
+      if (refreshToken) setAppleRefreshToken.run(refreshToken, identity.appleId);
+    } catch (err) {
+      logger.warn({ err: err.message }, 'apple authorization code exchange failed');
+    }
+  }
   const user = getUserByAppleId.get(identity.appleId);
   const tokenVersion = revokeSessions(user.id);
   const token = signSessionToken(user.id, tokenVersion);
@@ -217,7 +232,18 @@ const deleteAccount = db.transaction((userId) => {
   db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 });
 
-router.delete('/me', requireAuth, (req, res) => {
+router.delete('/me', requireAuth, async (req, res) => {
+  // Apple requires revoking Sign in with Apple tokens on deletion. A failed
+  // revoke is logged, not fatal - the user's own deletion shouldn't hinge
+  // on Apple's endpoint being up.
+  const refreshToken = getUserById.get(req.userId)?.apple_refresh_token;
+  if (refreshToken) {
+    try {
+      await revokeAppleToken(refreshToken);
+    } catch (err) {
+      logger.error({ userId: req.userId, err: err.message }, 'apple token revocation failed');
+    }
+  }
   deleteAccount(req.userId);
   // The session token stays cryptographically valid until it expires, but
   // every authed route 404s once the user row is gone, and the app clears

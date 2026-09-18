@@ -264,6 +264,13 @@ if (googleIdColumn && googleIdColumn.notnull === 1) {
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_apple_id ON users(apple_id)');
 
+// Sign in with Apple refresh token, kept only so DELETE /me can revoke it
+// (see docs/apple-sign-in.md). Added after the rebuild above, which copies
+// an explicit column list.
+if (!db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === 'apple_refresh_token')) {
+  db.exec('ALTER TABLE users ADD COLUMN apple_refresh_token TEXT');
+}
+
 // One row per signed-in user - the account-linked counterpart to the
 // several preferences that otherwise live only in the app's own
 // AsyncStorage (theme/font size/debug mode/language/sources/notification
