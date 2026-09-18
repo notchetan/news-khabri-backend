@@ -74,9 +74,37 @@ account-linking flow - the same person signing in with Google and then
 with Apple gets two separate accounts (same as most apps; revisit only if
 there's demand).
 
+## Token revocation
+
+Apple requires apps that offer Sign in with Apple to revoke the user's
+tokens when they delete their account (Guideline 5.1.1(v)); reviewers
+check for it. `/auth/revoke` takes a refresh token, and the only way to get
+one is to exchange the one-time `authorizationCode` the app receives at
+sign-in. So:
+
+- the app forwards `authorizationCode` in the `POST /auth/apple` body;
+- the route exchanges it at `https://appleid.apple.com/auth/token` and
+  stores the `refresh_token` in `users.apple_refresh_token`. A failed
+  exchange is logged and sign-in still succeeds;
+- `DELETE /me` calls `/auth/revoke` with it before deleting the rows. A
+  failed revoke is logged at `error` and the deletion still goes ahead -
+  the user's own deletion shouldn't hinge on Apple's endpoint.
+
+Both calls authenticate with a **client secret**: a short-lived ES256 JWT
+(`iss` team id, `sub` bundle id, `aud` `https://appleid.apple.com`,
+`kid` key id) signed with a Sign in with Apple private key (`.p8`,
+created under Certificates, Identifiers & Profiles -> Keys, with "Sign in
+with Apple" enabled for the `com.newskhabri.app` App ID). Without
+`APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` set, both calls
+are skipped (and production logs a warning at boot) - so this must be
+configured before App Store review. Accounts that signed in before this
+existed have no stored refresh token and can't be revoked; that only
+affects pre-launch test accounts.
+
 ## Config
 
-`APPLE_CLIENT_ID` (env, default `com.newskhabri.app`). The `authLimiter`
+`APPLE_CLIENT_ID` (env, default `com.newskhabri.app`); `APPLE_TEAM_ID`,
+`APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` for revocation (above). The `authLimiter`
 in `index.js` (30 / 15 min) covers `/auth/apple` as well as `/auth/google`.
 
 ## What still needs an Apple Developer account

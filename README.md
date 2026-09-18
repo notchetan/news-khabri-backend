@@ -55,6 +55,7 @@ are optional.
 | --- | --- | --- |
 | `GOOGLE_WEB_CLIENT_ID` | — | Web OAuth client ID; the `audience` a Google ID token is verified against. |
 | `JWT_SECRET` | — | Secret for signing this app's own session tokens. Required outside tests. |
+| `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | — | Sign in with Apple key for revoking tokens on account deletion. Required for App Store review. |
 | `PORT` | `3000` | Port to listen on. |
 | `DB_PATH` | `articles.db` | SQLite database file path. Point at a mounted volume on a container host. |
 | `CORS_ORIGIN` | — | Comma-separated allowed origins. Unset reflects any origin. |
